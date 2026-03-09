@@ -1,0 +1,54 @@
+## C# / .NET
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.csproj.user
+
+## NuGet
+*.nupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/manifest.json
+!**/[Pp]ackages/packages-lock.json
+
+## JetBrains Rider / ReSharper
+.idea/
+*.sln.iml
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+## Visual Studio
+.vs/
+*.vsconfig
+
+## Unity - General
+ZG2.UnityProject/Library/
+ZG2.UnityProject/Temp/
+ZG2.UnityProject/Obj/
+ZG2.UnityProject/Build/
+ZG2.UnityProject/Builds/
+ZG2.UnityProject/Logs/
+ZG2.UnityProject/UserSettings/
+ZG2.UnityProject/MemoryCaptures/
+ZG2.UnityProject/Recordings/
+
+## Unity - Asset import artifacts
+ZG2.UnityProject/Assets/Plugins/Editor/JetBrains*
+
+## Unity - Crashlytics
+crashlytics-build.properties
+sysinfo.txt
+
+## OS files
+[Tt]humbs.db
+*.DS_Store
+Desktop.ini
+
+## User References
+References/
+.github/

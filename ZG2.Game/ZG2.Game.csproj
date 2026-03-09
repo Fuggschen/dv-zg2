@@ -1,0 +1,129 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <AssemblyName>ZG2</AssemblyName>
+    <RootNamespace>ZG2</RootNamespace>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <DebugType>portable</DebugType>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <!-- Exclude the References folder (decompiled game source, not part of mod) -->
+  <ItemGroup>
+    <Compile Remove="References\**" />
+  </ItemGroup>
+
+  <!-- NuGet packages -->
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.3.*" />
+    <PackageReference Include="Krafs.Publicizer" Version="2.*" />
+  </ItemGroup>
+
+  <!-- Publicize Assembly-CSharp to access private/internal members at compile time -->
+  <ItemGroup>
+    <Publicize Include="Assembly-CSharp" />
+  </ItemGroup>
+
+  <!-- Game DLL references (paths resolved via Directory.Build.targets ReferencePath) -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="DV.Utils">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\DV.Utils.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="DV.Common">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\DV.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="DV.CabControls.Spec">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\DV.CabControls.Spec.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="DV.Inventory">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\DV.Inventory.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="DV.Localization">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\DV.Localization.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="DV.ThingTypes">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\DV.ThingTypes.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="DV.UIFramework">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\DV.UIFramework.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="DV.Simulation">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\DV.Simulation.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\Newtonsoft.Json.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Unity engine modules -->
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.PhysicsModule">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\UnityEngine.PhysicsModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.AssetBundleModule">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\UnityEngine.AssetBundleModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.IMGUIModule">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- Unity Mod Manager -->
+    <Reference Include="UnityModManager">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\UnityModManager\UnityModManager.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- WorldStreamer (contains WorldMover) -->
+    <Reference Include="WorldStreamer">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\WorldStreamer.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- DV.UI (contains CanvasController, ACanvasController) -->
+    <Reference Include="DV.UI">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\DV.UI.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- custom_item_mod framework (UMM mod dependency) -->
+    <Reference Include="custom_item_mod">
+      <HintPath>$(DvInstallDir)\Mods\custom_item_mod\custom_item_mod.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="custom_item_components">
+      <HintPath>$(DvInstallDir)\Mods\custom_item_mod\custom_item_components.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+
+    <!-- TMPro and DV.Shops (needed by custom_item_mod API types) -->
+    <Reference Include="Unity.TextMeshPro">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\Unity.TextMeshPro.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="DV.Layers">
+      <HintPath>$(DvInstallDir)\DerailValley_Data\Managed\DV.Layers.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+</Project>

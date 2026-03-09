@@ -1,0 +1,13 @@
+{
+    "Id": "ZG2",
+    "DisplayName": "ZG2 Zugschlusstafeln (Train End Boards)",
+    "Author": "Fuggschen",
+    "Version": "1.0.0",
+    "ManagerVersion": "0.27.2",
+    "EntryMethod": "ZG2.Main.Load",
+    "AssemblyName": "ZG2.dll",
+    "Requirements": ["custom_item_mod"],
+    "MultiplayerCompatibility": "All",
+    "HomePage": "https://www.nexusmods.com/derailvalley/mods/1445",
+    "Repository": "https://raw.githubusercontent.com/fuggschen/dv-zg2/refs/heads/main/repository.json"
+}
