@@ -39,17 +39,40 @@ namespace ZG2
 
         /// <summary>
         /// Draws the settings UI inside UMM's settings panel.
+        /// When connected as a client in multiplayer, settings are read-only
+        /// (controlled by the host and synced via packets).
         /// </summary>
         public void OnGUI()
         {
+            bool isClient = ZG2MPBoardSync.IsClientInMP;
+
             GUILayout.BeginVertical("box");
             GUILayout.Label("<b>ZG2 Zugschlusstafeln — Settings</b>");
+
+            if (isClient)
+            {
+                GUILayout.Label("<i>Settings are controlled by the host and synced automatically.</i>");
+                GUILayout.Space(4);
+            }
+
             GUILayout.Space(4);
 
             // Penalty slider
             GUILayout.BeginHorizontal();
             GUILayout.Label($"Penalty for missing boards: {PenaltyPercent:F0}%", GUILayout.Width(280));
-            PenaltyPercent = GUILayout.HorizontalSlider(PenaltyPercent, 0f, 100f, GUILayout.Width(300));
+            if (isClient)
+            {
+                GUILayout.HorizontalSlider(PenaltyPercent, 0f, 100f, GUILayout.Width(300));
+            }
+            else
+            {
+                float newPenalty = GUILayout.HorizontalSlider(PenaltyPercent, 0f, 100f, GUILayout.Width(300));
+                if (newPenalty != PenaltyPercent)
+                {
+                    PenaltyPercent = newPenalty;
+                    ZG2MPBoardSync.BroadcastSettings();
+                }
+            }
             GUILayout.EndHorizontal();
 
             GUILayout.Space(4);
@@ -57,19 +80,39 @@ namespace ZG2
             // Boards per station
             GUILayout.BeginHorizontal();
             GUILayout.Label($"Boards per station: {BoardsPerStation}", GUILayout.Width(280));
-            BoardsPerStation = Mathf.RoundToInt(
-                GUILayout.HorizontalSlider(BoardsPerStation, 1f, 10f, GUILayout.Width(300)));
+            if (isClient)
+            {
+                GUILayout.HorizontalSlider(BoardsPerStation, 1f, 10f, GUILayout.Width(300));
+            }
+            else
+            {
+                int newBoards = Mathf.RoundToInt(
+                    GUILayout.HorizontalSlider(BoardsPerStation, 1f, 10f, GUILayout.Width(300)));
+                if (newBoards != BoardsPerStation)
+                {
+                    BoardsPerStation = newBoards;
+                    ZG2MPBoardSync.BroadcastSettings();
+                }
+            }
             GUILayout.EndHorizontal();
 
             GUILayout.Space(4);
 
             // Map markers toggle
             GUILayout.BeginHorizontal();
-            bool newShowMarkers = GUILayout.Toggle(ShowMapMarkers, " Show map markers on wagons with ZG2 boards");
-            if (newShowMarkers != ShowMapMarkers)
+            if (isClient)
             {
-                ShowMapMarkers = newShowMarkers;
-                ZG2MapMarkerManager.OnSettingChanged(ShowMapMarkers);
+                GUILayout.Toggle(ShowMapMarkers, " Show map markers on wagons with ZG2 boards");
+            }
+            else
+            {
+                bool newShowMarkers = GUILayout.Toggle(ShowMapMarkers, " Show map markers on wagons with ZG2 boards");
+                if (newShowMarkers != ShowMapMarkers)
+                {
+                    ShowMapMarkers = newShowMarkers;
+                    ZG2MapMarkerManager.OnSettingChanged(ShowMapMarkers);
+                    ZG2MPBoardSync.BroadcastSettings();
+                }
             }
             GUILayout.EndHorizontal();
 
@@ -78,7 +121,19 @@ namespace ZG2
             // Check interval
             GUILayout.BeginHorizontal();
             GUILayout.Label($"Check interval: {CheckIntervalSeconds:F0}s", GUILayout.Width(280));
-            CheckIntervalSeconds = GUILayout.HorizontalSlider(CheckIntervalSeconds, 10f, 120f, GUILayout.Width(300));
+            if (isClient)
+            {
+                GUILayout.HorizontalSlider(CheckIntervalSeconds, 10f, 120f, GUILayout.Width(300));
+            }
+            else
+            {
+                float newInterval = GUILayout.HorizontalSlider(CheckIntervalSeconds, 10f, 120f, GUILayout.Width(300));
+                if (newInterval != CheckIntervalSeconds)
+                {
+                    CheckIntervalSeconds = newInterval;
+                    ZG2MPBoardSync.BroadcastSettings();
+                }
+            }
             GUILayout.EndHorizontal();
 
             GUILayout.EndVertical();

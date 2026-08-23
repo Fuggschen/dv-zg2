@@ -47,6 +47,19 @@ namespace ZG2
                 }
             }
 
+            // Fallback for multiplayer: check if any client has reported a board on this car.
+            // In MP, a client's gadget placement only exists on the client's scene — the host
+            // won't see it in the TrainCarCustomization or hierarchy. The virtual registry
+            // tracks client-reported placements so detection works host-side.
+            if (ZG2MPUtil.IsMultiplayerActive)
+            {
+                string carId = car.logicCar?.ID;
+                if (carId != null && ZG2MPBoardSync.HasClientReportedBoard(carId))
+                {
+                    return true;
+                }
+            }
+
             return false;
         }
 

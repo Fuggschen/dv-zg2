@@ -126,6 +126,9 @@ namespace ZG2
                 // 6. Scan for existing mounted boards and add map markers
                 ZG2MapMarkerManager.ScanAndAddAll();
 
+                // 7. Initialise MP board sync (client → host notifications)
+                ZG2MPBoardSync.Initialise();
+
                 Log("ZG2 mod systems initialised.");
             }
             catch (Exception ex)
@@ -146,6 +149,7 @@ namespace ZG2
         {
             try
             {
+                ZG2MPBoardSync.Shutdown();
                 ZG2JobTracker.Shutdown();
                 ZG2MapMarkerManager.Shutdown();
                 ZG2SaveManager.Shutdown();

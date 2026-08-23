@@ -5,7 +5,8 @@
         <ReferencePath>
             $(DvInstallDir)\DerailValley_Data\Managed\;
             $(DvInstallDir)\DerailValley_Data\Managed\UnityModManager\;
-            $(UnityInstallDir)\Data\Managed\
+            $(UnityInstallDir)\Data\Managed\;
+            $(DvInstallDir)\Mods\custom_item_mod\
         </ReferencePath>
         <AssemblySearchPaths>$(AssemblySearchPaths);$(ReferencePath);</AssemblySearchPaths>
 		<SignToolPath>C:\Program Files (x86)\Microsoft SDKs\ClickOnce\SignTool\</SignToolPath>
