@@ -2,7 +2,7 @@
     "Id": "ZG2",
     "DisplayName": "ZG2 Zugschlusstafeln (Train End Boards)",
     "Author": "Fuggschen",
-    "Version": "1.0.0",
+    "Version": "1.0.1",
     "ManagerVersion": "0.27.2",
     "EntryMethod": "ZG2.Main.Load",
     "AssemblyName": "ZG2.dll",
