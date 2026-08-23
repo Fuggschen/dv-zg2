@@ -32,6 +32,7 @@ namespace ZG2
         public float PenaltyPercent { get; set; }
         public int BoardsPerStation { get; set; }
         public bool ShowMapMarkers { get; set; }
+        public bool SpawnBoardsAtStations { get; set; }
         public float CheckIntervalSeconds { get; set; }
     }
 }

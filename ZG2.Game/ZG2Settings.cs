@@ -20,6 +20,10 @@ namespace ZG2
         [Draw("Show Map Markers")]
         public bool ShowMapMarkers = true;
 
+        /// <summary>Whether to spawn ZG2 boards at stations.</summary>
+        [Draw("Spawn Boards At Stations")]
+        public bool SpawnBoardsAtStations = true;
+
         /// <summary>Interval in seconds between ZG2 board presence checks (10–120).</summary>
         [Draw("Check Interval (seconds)", Min = 10f, Max = 120f)]
         public float CheckIntervalSeconds = 30f;
@@ -111,6 +115,25 @@ namespace ZG2
                 {
                     ShowMapMarkers = newShowMarkers;
                     ZG2MapMarkerManager.OnSettingChanged(ShowMapMarkers);
+                    ZG2MPBoardSync.BroadcastSettings();
+                }
+            }
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(4);
+
+            // Spawn boards at stations toggle
+            GUILayout.BeginHorizontal();
+            if (isClient)
+            {
+                GUILayout.Toggle(SpawnBoardsAtStations, " Spawn ZG2 boards at stations");
+            }
+            else
+            {
+                bool newSpawnBoards = GUILayout.Toggle(SpawnBoardsAtStations, " Spawn ZG2 boards at stations");
+                if (newSpawnBoards != SpawnBoardsAtStations)
+                {
+                    SpawnBoardsAtStations = newSpawnBoards;
                     ZG2MPBoardSync.BroadcastSettings();
                 }
             }

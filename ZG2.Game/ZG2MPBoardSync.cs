@@ -251,6 +251,7 @@ namespace ZG2
                 PenaltyPercent = settings.PenaltyPercent,
                 BoardsPerStation = settings.BoardsPerStation,
                 ShowMapMarkers = settings.ShowMapMarkers,
+                SpawnBoardsAtStations = settings.SpawnBoardsAtStations,
                 CheckIntervalSeconds = settings.CheckIntervalSeconds
             }, reliable: true, excludeSelf: true);
 
@@ -273,6 +274,7 @@ namespace ZG2
                 PenaltyPercent = settings.PenaltyPercent,
                 BoardsPerStation = settings.BoardsPerStation,
                 ShowMapMarkers = settings.ShowMapMarkers,
+                SpawnBoardsAtStations = settings.SpawnBoardsAtStations,
                 CheckIntervalSeconds = settings.CheckIntervalSeconds
             }, player);
 
@@ -290,6 +292,7 @@ namespace ZG2
 
             settings.PenaltyPercent = packet.PenaltyPercent;
             settings.BoardsPerStation = packet.BoardsPerStation;
+            settings.SpawnBoardsAtStations = packet.SpawnBoardsAtStations;
             settings.CheckIntervalSeconds = packet.CheckIntervalSeconds;
 
             bool markersChanged = settings.ShowMapMarkers != packet.ShowMapMarkers;

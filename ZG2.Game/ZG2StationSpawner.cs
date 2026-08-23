@@ -20,6 +20,11 @@ namespace ZG2
                 Main.Log("ZG2StationSpawner: skipping spawn on MP client (host-only).");
                 return;
             }
+            if (!Main.Settings.SpawnBoardsAtStations)
+            {
+                Main.Log("ZG2StationSpawner: board spawning at stations is disabled.");
+                return;
+            }
 
             if (!ZG2BoardFactory.IsInitialised)
             {
