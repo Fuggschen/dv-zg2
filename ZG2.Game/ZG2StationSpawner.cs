@@ -15,11 +15,14 @@ namespace ZG2
         /// </summary>
         public static void SpawnAll()
         {
+            // Disabled check until gadget sync is native
+            /*
             if (!ZG2MPUtil.IsSinglePlayerOrHost)
             {
                 Main.Log("ZG2StationSpawner: skipping spawn on MP client (host-only).");
                 return;
             }
+            */
             if (!Main.Settings.SpawnBoardsAtStations)
             {
                 Main.Log("ZG2StationSpawner: board spawning at stations is disabled.");
