@@ -53,3 +53,4 @@ Desktop.ini
 References/
 .github/
 *.targets
+dist/

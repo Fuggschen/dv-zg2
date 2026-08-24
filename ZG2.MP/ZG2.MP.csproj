@@ -28,5 +28,46 @@
     <Reference Include="UnityEngine.CoreModule" />
   </ItemGroup>
 
+  <!-- Release: copy all mod files to dist/ -->
+  <Target Name="CopyAndPack" AfterTargets="Build" Condition="'$(Configuration)' == 'Release'">
+    <PropertyGroup>
+      <DistDir>$(MSBuildThisFileDirectory)..\dist\ZG2</DistDir>
+      <InfoJsonPath>$(MSBuildProjectDirectory)/../dist/ZG2/info.json</InfoJsonPath>
+    </PropertyGroup>
+
+    <MakeDir Directories="$(DistDir)" />
+
+    <!-- Copy ZG2.dll -->
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)..\ZG2.Game\bin\$(Configuration)\ZG2.dll"
+          DestinationFolder="$(DistDir)"
+          SkipUnchangedFiles="false" />
+
+    <!-- Copy ZG2.MP.dll -->
+    <Copy SourceFiles="$(OutputPath)ZG2.MP.dll"
+          DestinationFolder="$(DistDir)"
+          SkipUnchangedFiles="false" />
+
+    <!-- Copy asset bundle -->
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)..\ZG2.UnityProject\Assets\AssetBundles\zg2boards"
+          DestinationFolder="$(DistDir)"
+          SkipUnchangedFiles="true"
+          Condition="Exists('$(MSBuildThisFileDirectory)..\ZG2.UnityProject\Assets\AssetBundles\zg2boards')" />
+
+    <!-- Copy Info.json -->
+    <Copy SourceFiles="$(MSBuildThisFileDirectory)..\Info.json"
+          DestinationFolder="$(DistDir)"
+          SkipUnchangedFiles="true" />
+
+  <!-- Pack zip -->
+  <Exec Command="powershell -NoProfile -Command &quot;$json = Get-Content -Raw '$(InfoJsonPath)' | ConvertFrom-Json; Write-Output $json.Version&quot;"
+        ConsoleToMSBuild="true">
+    <Output TaskParameter="ConsoleOutput" PropertyName="version" />
+  </Exec>
+
+  <ZipDirectory
+    Overwrite="true"
+    SourceDirectory="$(MSBuildProjectDirectory)/../dist/ZG2"
+    DestinationFile="$(MSBuildProjectDirectory)/../dist/ZG2_$(version).zip" />
+</Target>
 
 </Project>
