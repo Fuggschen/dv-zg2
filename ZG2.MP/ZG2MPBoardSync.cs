@@ -3,8 +3,9 @@ using DV.Utils;
 using MPAPI;
 using MPAPI.Interfaces;
 using MPAPI.Types;
+using ZG2;
 
-namespace ZG2
+namespace ZG2.MP
 {
     /// <summary>
     /// Manages a virtual registry of ZG2 boards that clients have placed on train cars.
@@ -12,21 +13,21 @@ namespace ZG2
     /// <see cref="ZG2GadgetDetector.HasZG2Board"/> can detect boards that only exist
     /// on client-side scenes (not present in the host's TrainCarCustomization).
     /// </summary>
-    public static class ZG2MPBoardSync
+    public class ZG2MPBoardSync
     {
         /// <summary>
         /// Maps carId → (playerId → board count) for client-reported boards.
         /// Only maintained on the host. Tracks how many boards each player has on each car.
         /// </summary>
-        private static readonly Dictionary<string, Dictionary<byte, int>> clientBoards
+        private readonly Dictionary<string, Dictionary<byte, int>> clientBoards
             = new Dictionary<string, Dictionary<byte, int>>();
 
-        private static bool initialised;
+        private bool initialised;
 
         /// <summary>
         /// Subscribe to MPAPI lifecycle events. Call once on world load.
         /// </summary>
-        public static void Initialise()
+        public void Initialise()
         {
             if (initialised) return;
             initialised = true;
@@ -49,7 +50,7 @@ namespace ZG2
         /// <summary>
         /// Unsubscribe from all events and clear state. Call on world unload / mod disable.
         /// </summary>
-        public static void Shutdown()
+        public void Shutdown()
         {
             if (!initialised) return;
             initialised = false;
@@ -65,7 +66,7 @@ namespace ZG2
 
         #region Host-side: receive and track client board placements
 
-        private static void OnServerStarted(IServer server)
+        private void OnServerStarted(IServer server)
         {
             server.RegisterPacket<ZG2BoardAttachedPacket>(HandleBoardAttached);
             server.RegisterPacket<ZG2BoardRemovedPacket>(HandleBoardRemoved);
@@ -75,14 +76,14 @@ namespace ZG2
             Main.Log("ZG2MPBoardSync: Server packet handlers registered.");
         }
 
-        private static void OnServerStopped()
+        private void OnServerStopped()
         {
             UnhookServerEvents();
             clientBoards.Clear();
             Main.Log("ZG2MPBoardSync: Server stopped, registry cleared.");
         }
 
-        private static void UnhookServerEvents()
+        private void UnhookServerEvents()
         {
             var server = MultiplayerAPI.Server;
             if (server != null)
@@ -92,7 +93,7 @@ namespace ZG2
             }
         }
 
-        private static void HandleBoardAttached(ZG2BoardAttachedPacket packet, IPlayer sender)
+        private void HandleBoardAttached(ZG2BoardAttachedPacket packet, IPlayer sender)
         {
             if (string.IsNullOrEmpty(packet.CarId)) return;
 
@@ -113,7 +114,7 @@ namespace ZG2
                 TryUpdateMapMarker(packet.CarId, attached: true);
         }
 
-        private static void HandleBoardRemoved(ZG2BoardRemovedPacket packet, IPlayer sender)
+        private void HandleBoardRemoved(ZG2BoardRemovedPacket packet, IPlayer sender)
         {
             if (string.IsNullOrEmpty(packet.CarId)) return;
 
@@ -142,7 +143,7 @@ namespace ZG2
             }
         }
 
-        private static void OnPlayerDisconnected(IPlayer player)
+        private void OnPlayerDisconnected(IPlayer player)
         {
             // Remove all board entries for this player
             var carsToClean = new List<string>();
@@ -168,7 +169,7 @@ namespace ZG2
             }
         }
 
-        private static void OnPlayerReady(IPlayer player)
+        private void OnPlayerReady(IPlayer player)
         {
             // Send current settings to the newly connected player
             SendSettingsToPlayer(player);
@@ -176,9 +177,8 @@ namespace ZG2
 
         /// <summary>
         /// Checks whether any client has reported a ZG2 board on the given car.
-        /// Called by <see cref="ZG2GadgetDetector.HasZG2Board"/> as a fallback.
         /// </summary>
-        public static bool HasClientReportedBoard(string carId)
+        public bool HasClientReportedBoard(string carId)
         {
             if (string.IsNullOrEmpty(carId)) return false;
             return clientBoards.TryGetValue(carId, out var players) && players.Count > 0;
@@ -187,7 +187,7 @@ namespace ZG2
         /// <summary>
         /// Attempts to find a TrainCar by its logic car ID and update its map marker.
         /// </summary>
-        private static void TryUpdateMapMarker(string carId, bool attached)
+        private void TryUpdateMapMarker(string carId, bool attached)
         {
             var car = FindTrainCarById(carId);
             if (car == null) return;
@@ -219,13 +219,13 @@ namespace ZG2
 
         #region Client-side: send board placement notifications
 
-        private static void OnClientStarted(IClient client)
+        private void OnClientStarted(IClient client)
         {
             client.RegisterPacket<ZG2SettingsSyncPacket>(HandleSettingsReceived);
             Main.Log("ZG2MPBoardSync: Client started, settings sync handler registered.");
         }
 
-        private static void OnClientStopped()
+        private void OnClientStopped()
         {
             Main.Log("ZG2MPBoardSync: Client stopped.");
         }
@@ -238,21 +238,19 @@ namespace ZG2
         /// Called by the host when settings change or a new player connects.
         /// Broadcasts current settings to all connected clients.
         /// </summary>
-        public static void BroadcastSettings()
+        public void BroadcastSettings(float penaltyPercent, int boardsPerStation,
+            bool showMapMarkers, bool spawnBoardsAtStations, float checkIntervalSeconds)
         {
-            var server = ZG2MPUtil.Server;
+            var server = MultiplayerAPI.Server;
             if (server == null) return;
-
-            var settings = Main.Settings;
-            if (settings == null) return;
 
             server.SendPacketToAll(new ZG2SettingsSyncPacket
             {
-                PenaltyPercent = settings.PenaltyPercent,
-                BoardsPerStation = settings.BoardsPerStation,
-                ShowMapMarkers = settings.ShowMapMarkers,
-                SpawnBoardsAtStations = settings.SpawnBoardsAtStations,
-                CheckIntervalSeconds = settings.CheckIntervalSeconds
+                PenaltyPercent = penaltyPercent,
+                BoardsPerStation = boardsPerStation,
+                ShowMapMarkers = showMapMarkers,
+                SpawnBoardsAtStations = spawnBoardsAtStations,
+                CheckIntervalSeconds = checkIntervalSeconds
             }, reliable: true, excludeSelf: true);
 
             Main.Log("ZG2MPBoardSync: Settings broadcast to all clients.");
@@ -261,9 +259,9 @@ namespace ZG2
         /// <summary>
         /// Called by the host to send current settings to a specific player.
         /// </summary>
-        public static void SendSettingsToPlayer(IPlayer player)
+        private void SendSettingsToPlayer(IPlayer player)
         {
-            var server = ZG2MPUtil.Server;
+            var server = MultiplayerAPI.Server;
             if (server == null || player == null) return;
 
             var settings = Main.Settings;
@@ -285,7 +283,7 @@ namespace ZG2
         /// Called on the client when a settings sync packet is received from the host.
         /// Applies the host's settings to the local settings instance.
         /// </summary>
-        private static void HandleSettingsReceived(ZG2SettingsSyncPacket packet)
+        private void HandleSettingsReceived(ZG2SettingsSyncPacket packet)
         {
             var settings = Main.Settings;
             if (settings == null) return;
@@ -309,20 +307,14 @@ namespace ZG2
         }
 
         /// <summary>
-        /// Returns true if the current instance is a client (not host) in multiplayer.
-        /// Used by the settings UI to disable editing.
-        /// </summary>
-        public static bool IsClientInMP => ZG2MPUtil.IsClient;
-
-        /// <summary>
         /// Called by the client when a ZG2 board is attached to a train car.
         /// Sends a packet to the host so it can track the placement.
         /// </summary>
-        public static void NotifyBoardAttached(string carId)
+        public void NotifyBoardAttached(string carId)
         {
             if (string.IsNullOrEmpty(carId)) return;
 
-            var client = ZG2MPUtil.Client;
+            var client = MultiplayerAPI.Client;
             if (client == null) return;
 
             client.SendPacketToServer(new ZG2BoardAttachedPacket { CarId = carId });
@@ -333,11 +325,11 @@ namespace ZG2
         /// Called by the client when a ZG2 board is removed from a train car.
         /// Sends a packet to the host so it can update its tracking.
         /// </summary>
-        public static void NotifyBoardRemoved(string carId)
+        public void NotifyBoardRemoved(string carId)
         {
             if (string.IsNullOrEmpty(carId)) return;
 
-            var client = ZG2MPUtil.Client;
+            var client = MultiplayerAPI.Client;
             if (client == null) return;
 
             client.SendPacketToServer(new ZG2BoardRemovedPacket { CarId = carId });

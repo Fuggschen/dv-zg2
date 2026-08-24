@@ -1,6 +1,6 @@
 using MPAPI.Interfaces.Packets;
 
-namespace ZG2
+namespace ZG2.MP
 {
     /// <summary>
     /// Sent by a client to the host when a ZG2 board is attached to a train car.

@@ -32,7 +32,7 @@ namespace ZG2.Patches
                 {
                     string carId = car.logicCar?.ID;
                     if (carId != null)
-                        ZG2MPBoardSync.NotifyBoardAttached(carId);
+                        ZG2MPUtil.NotifyBoardAttached(carId);
                 }
             }
         }
@@ -71,7 +71,7 @@ namespace ZG2.Patches
             {
                 string carId = __state.logicCar?.ID;
                 if (carId != null)
-                    ZG2MPBoardSync.NotifyBoardRemoved(carId);
+                    ZG2MPUtil.NotifyBoardRemoved(carId);
             }
         }
     }

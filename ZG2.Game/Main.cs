@@ -42,6 +42,9 @@ namespace ZG2
 
             harmony = new Harmony(modEntry.Info.Id);
 
+            // Load multiplayer integration if the MP mod is present
+            ZG2MPUtil.LoadIntegration(modEntry);
+
             return true;
         }
 
@@ -126,8 +129,8 @@ namespace ZG2
                 // 6. Scan for existing mounted boards and add map markers
                 ZG2MapMarkerManager.ScanAndAddAll();
 
-                // 7. Initialise MP board sync (client → host notifications)
-                ZG2MPBoardSync.Initialise();
+                // 7. Initialise MP integration (client → host notifications)
+                ZG2MPUtil.Initialise();
 
                 Log("ZG2 mod systems initialised.");
             }
@@ -149,7 +152,7 @@ namespace ZG2
         {
             try
             {
-                ZG2MPBoardSync.Shutdown();
+                ZG2MPUtil.Shutdown();
                 ZG2JobTracker.Shutdown();
                 ZG2MapMarkerManager.Shutdown();
                 ZG2SaveManager.Shutdown();

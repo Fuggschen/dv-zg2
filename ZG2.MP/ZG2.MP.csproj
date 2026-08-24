@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>9.0</LangVersion>
+    <AssemblyName>ZG2.MP</AssemblyName>
+    <RootNamespace>ZG2.MP</RootNamespace>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
+    <DebugType>portable</DebugType>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+  </PropertyGroup>
+
+  <!-- NuGet packages -->
+  <ItemGroup>
+    <PackageReference Include="DVMultiplayerAPI" Version="1.1.0" />
+  </ItemGroup>
+
+  <!-- Reference to ZG2.Game for the IZG2MPIntegration interface and shared types -->
+  <ItemGroup>
+    <ProjectReference Include="..\ZG2.Game\ZG2.Game.csproj" />
+  </ItemGroup>
+
+  <!-- Game DLL references (paths resolved via Directory.Build.targets ReferencePath) -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp" />
+    <Reference Include="DV.Utils" />
+    <Reference Include="UnityModManager" />
+    <Reference Include="UnityEngine.CoreModule" />
+  </ItemGroup>
+
+
+</Project>

@@ -54,7 +54,7 @@ namespace ZG2
             if (ZG2MPUtil.IsMultiplayerActive)
             {
                 string carId = car.logicCar?.ID;
-                if (carId != null && ZG2MPBoardSync.HasClientReportedBoard(carId))
+                if (carId != null && ZG2MPUtil.HasClientReportedBoard(carId))
                 {
                     return true;
                 }

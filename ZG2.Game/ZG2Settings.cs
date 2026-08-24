@@ -48,7 +48,7 @@ namespace ZG2
         /// </summary>
         public void OnGUI()
         {
-            bool isClient = ZG2MPBoardSync.IsClientInMP;
+            bool isClient = ZG2MPUtil.IsClient;
 
             GUILayout.BeginVertical("box");
             GUILayout.Label("<b>ZG2 Zugschlusstafeln — Settings</b>");
@@ -57,6 +57,8 @@ namespace ZG2
             {
                 GUILayout.Label("<i>Settings are controlled by the host and synced automatically.</i>");
                 GUILayout.Space(4);
+                GUILayout.EndVertical();
+                return;
             }
 
             GUILayout.Space(4);
@@ -74,7 +76,8 @@ namespace ZG2
                 if (newPenalty != PenaltyPercent)
                 {
                     PenaltyPercent = newPenalty;
-                    ZG2MPBoardSync.BroadcastSettings();
+                    ZG2MPUtil.BroadcastSettings(PenaltyPercent, BoardsPerStation,
+                        ShowMapMarkers, SpawnBoardsAtStations, CheckIntervalSeconds);
                 }
             }
             GUILayout.EndHorizontal();
@@ -95,7 +98,8 @@ namespace ZG2
                 if (newBoards != BoardsPerStation)
                 {
                     BoardsPerStation = newBoards;
-                    ZG2MPBoardSync.BroadcastSettings();
+                    ZG2MPUtil.BroadcastSettings(PenaltyPercent, BoardsPerStation,
+                        ShowMapMarkers, SpawnBoardsAtStations, CheckIntervalSeconds);
                 }
             }
             GUILayout.EndHorizontal();
@@ -115,7 +119,8 @@ namespace ZG2
                 {
                     ShowMapMarkers = newShowMarkers;
                     ZG2MapMarkerManager.OnSettingChanged(ShowMapMarkers);
-                    ZG2MPBoardSync.BroadcastSettings();
+                    ZG2MPUtil.BroadcastSettings(PenaltyPercent, BoardsPerStation,
+                        ShowMapMarkers, SpawnBoardsAtStations, CheckIntervalSeconds);
                 }
             }
             GUILayout.EndHorizontal();
@@ -134,7 +139,8 @@ namespace ZG2
                 if (newSpawnBoards != SpawnBoardsAtStations)
                 {
                     SpawnBoardsAtStations = newSpawnBoards;
-                    ZG2MPBoardSync.BroadcastSettings();
+                    ZG2MPUtil.BroadcastSettings(PenaltyPercent, BoardsPerStation,
+                        ShowMapMarkers, SpawnBoardsAtStations, CheckIntervalSeconds);
                 }
             }
             GUILayout.EndHorizontal();
@@ -154,7 +160,8 @@ namespace ZG2
                 if (newInterval != CheckIntervalSeconds)
                 {
                     CheckIntervalSeconds = newInterval;
-                    ZG2MPBoardSync.BroadcastSettings();
+                    ZG2MPUtil.BroadcastSettings(PenaltyPercent, BoardsPerStation,
+                        ShowMapMarkers, SpawnBoardsAtStations, CheckIntervalSeconds);
                 }
             }
             GUILayout.EndHorizontal();
