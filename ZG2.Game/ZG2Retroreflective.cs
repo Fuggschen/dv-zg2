@@ -18,7 +18,7 @@ namespace ZG2
         // so a rescan does not land as one spike.
         private const int FilterFrames = 10;
 
-        // Boards and lights both move (trains, carried lanterns), so the scan-time
+        // Boards and lights both move (trains, carried flashlights), so the scan-time
         // range filter keeps lights that could come into range before the next scan.
         private const float ScanRangeMargin = 50f;
 
@@ -33,7 +33,6 @@ namespace ZG2
             public Vector4 Color;
             public Vector4 SpotData;
             public float Strength;
-            public bool Directional;
         }
 
         // Shared by all boards: the scene is scanned at most every RescanInterval,
@@ -109,14 +108,9 @@ namespace ZG2
             for (; filterCursor < end; filterCursor++)
             {
                 var light = allLights[filterCursor];
-                if (light == null) continue;
-
-                if (light.type == LightType.Directional)
-                {
-                    pendingLights.Add(light);
-                    continue;
-                }
-                if (light.type != LightType.Point && light.type != LightType.Spot) continue;
+                // Only directed beams (headlights, flashlights) make the film glow;
+                // ambient sources like ceiling lamps, lanterns and the sun do not.
+                if (light == null || light.type != LightType.Spot) continue;
 
                 Vector3 lightPos = light.transform.position;
                 float reach = light.range + ScanRangeMargin;
@@ -169,37 +163,17 @@ namespace ZG2
                 if (light == null || !light.isActiveAndEnabled) continue;
 
                 Color c = light.color * light.intensity;
-                var data = new LightData
+                Vector3 pos = light.transform.position;
+                Vector3 fwd = light.transform.forward;
+                float cosHalf = Mathf.Cos(light.spotAngle * 0.5f * Mathf.Deg2Rad);
+
+                snapshot[snapshotCount++] = new LightData
                 {
+                    PosRange = new Vector4(pos.x, pos.y, pos.z, light.range),
                     Color = new Vector4(c.r, c.g, c.b, 0f),
-                    Strength = new Vector3(c.r, c.g, c.b).magnitude,
-                    Directional = light.type == LightType.Directional
+                    SpotData = new Vector4(fwd.x, fwd.y, fwd.z, cosHalf),
+                    Strength = new Vector3(c.r, c.g, c.b).magnitude
                 };
-
-                if (data.Directional)
-                {
-                    Vector3 dir = -light.transform.forward;
-                    data.PosRange = new Vector4(dir.x, dir.y, dir.z, -1f);
-                    data.SpotData = new Vector4(0f, 0f, 0f, -1f);
-                }
-                else
-                {
-                    Vector3 pos = light.transform.position;
-                    data.PosRange = new Vector4(pos.x, pos.y, pos.z, light.range);
-
-                    if (light.type == LightType.Spot)
-                    {
-                        Vector3 fwd = light.transform.forward;
-                        float cosHalf = Mathf.Cos(light.spotAngle * 0.5f * Mathf.Deg2Rad);
-                        data.SpotData = new Vector4(fwd.x, fwd.y, fwd.z, cosHalf);
-                    }
-                    else
-                    {
-                        data.SpotData = new Vector4(0f, 0f, 0f, -1f);
-                    }
-                }
-
-                snapshot[snapshotCount++] = data;
             }
         }
 
@@ -212,23 +186,14 @@ namespace ZG2
             Vector3 boardPos = targetRenderer.bounds.center;
             int count = 0;
 
-            // Keep the MaxLights strongest contributions, sorted by score. Directional
-            // lights always win; point and spot lights rank by attenuation * strength.
+            // Keep the MaxLights strongest contributions, sorted by attenuation * strength.
             for (int i = 0; i < snapshotCount; i++)
             {
-                float score;
-                if (snapshot[i].Directional)
-                {
-                    score = float.MaxValue;
-                }
-                else
-                {
-                    Vector4 pr = snapshot[i].PosRange;
-                    float distSqr = (new Vector3(pr.x, pr.y, pr.z) - boardPos).sqrMagnitude;
-                    float rangeSqr = pr.w * pr.w;
-                    if (distSqr > rangeSqr) continue;
-                    score = (1f - distSqr / rangeSqr) * snapshot[i].Strength;
-                }
+                Vector4 pr = snapshot[i].PosRange;
+                float distSqr = (new Vector3(pr.x, pr.y, pr.z) - boardPos).sqrMagnitude;
+                float rangeSqr = pr.w * pr.w;
+                if (distSqr > rangeSqr) continue;
+                float score = (1f - distSqr / rangeSqr) * snapshot[i].Strength;
 
                 if (count == MaxLights && score <= slotScores[MaxLights - 1]) continue;
 
