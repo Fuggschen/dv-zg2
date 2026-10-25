@@ -25,6 +25,9 @@ namespace ZG2
         /// <summary>Client sends a notification to the host that a board was removed.</summary>
         void NotifyBoardRemoved(string carId);
 
+        /// <summary>Host sends the car's current marker state to all connected clients.</summary>
+        void BroadcastMarkerState(TrainCar car);
+
         /// <summary>Host broadcasts current settings to all connected clients.</summary>
         void BroadcastSettings(float penaltyPercent, int boardsPerStation,
             bool showMapMarkers, bool spawnBoardsAtStations, float checkIntervalSeconds);

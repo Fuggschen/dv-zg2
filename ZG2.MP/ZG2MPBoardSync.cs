@@ -22,6 +22,12 @@ namespace ZG2.MP
         private readonly Dictionary<string, Dictionary<byte, int>> clientBoards
             = new Dictionary<string, Dictionary<byte, int>>();
 
+        /// <summary>
+        /// Car IDs the host reports as marked. Only maintained on clients.
+        /// Kept so markers can be applied to cars that spawn after the packet arrived.
+        /// </summary>
+        private readonly HashSet<string> hostMarkedCars = new HashSet<string>();
+
         private bool initialised;
 
         /// <summary>
@@ -38,6 +44,10 @@ namespace ZG2.MP
             MultiplayerAPI.ServerStopped += OnServerStopped;
             MultiplayerAPI.ClientStarted += OnClientStarted;
             MultiplayerAPI.ClientStopped += OnClientStopped;
+
+            var spawner = SingletonBehaviour<CarSpawner>.Instance;
+            if (spawner != null)
+                spawner.CarAboutToBeDeleted += OnCarDeleted;
 
             // If a server/client is already running (late init), hook immediately
             var server = MultiplayerAPI.Server;
@@ -60,8 +70,27 @@ namespace ZG2.MP
             MultiplayerAPI.ClientStarted -= OnClientStarted;
             MultiplayerAPI.ClientStopped -= OnClientStopped;
 
+            var spawner = SingletonBehaviour<CarSpawner>.Instance;
+            if (spawner != null)
+                spawner.CarAboutToBeDeleted -= OnCarDeleted;
+
             UnhookServerEvents();
+            UnhookClientEvents();
             clientBoards.Clear();
+        }
+
+        /// <summary>
+        /// Drops per-car state when a car is deleted, so a later car reusing the ID
+        /// does not inherit boards or markers. The marker itself is removed by
+        /// <see cref="ZG2MapMarkerManager"/>; clients delete the car on their side too.
+        /// </summary>
+        private void OnCarDeleted(TrainCar car)
+        {
+            string carId = car?.logicCar?.ID;
+            if (carId == null) return;
+
+            clientBoards.Remove(carId);
+            hostMarkedCars.Remove(carId);
         }
 
         #region Host-side: receive and track client board placements
@@ -112,6 +141,8 @@ namespace ZG2.MP
             // Trigger map marker on host if this is the first board on this car
             if (count == 0)
                 TryUpdateMapMarker(packet.CarId, attached: true);
+
+            BroadcastMarkerState(FindTrainCarById(packet.CarId));
         }
 
         private void HandleBoardRemoved(ZG2BoardRemovedPacket packet, IPlayer sender)
@@ -141,6 +172,10 @@ namespace ZG2.MP
                 clientBoards.Remove(packet.CarId);
                 TryUpdateMapMarker(packet.CarId, attached: false);
             }
+
+            // Also sent back to the reporting client: it removed its marker locally,
+            // but the host or another player may still have a board on this car.
+            BroadcastMarkerState(FindTrainCarById(packet.CarId));
         }
 
         private void OnPlayerDisconnected(IPlayer player)
@@ -160,6 +195,7 @@ namespace ZG2.MP
             {
                 clientBoards.Remove(carId);
                 TryUpdateMapMarker(carId, attached: false);
+                BroadcastMarkerState(FindTrainCarById(carId));
             }
 
             if (carsToClean.Count > 0)
@@ -173,6 +209,47 @@ namespace ZG2.MP
         {
             // Send current settings to the newly connected player
             SendSettingsToPlayer(player);
+            SendMarkersToPlayer(player);
+        }
+
+        /// <summary>
+        /// Sends the car's current marker state to all clients.
+        /// Called after any host-side change: the host's own placements and removals,
+        /// client reports, and disconnect cleanup.
+        /// </summary>
+        public void BroadcastMarkerState(TrainCar car)
+        {
+            var server = MultiplayerAPI.Server;
+            if (server == null || car == null || car.logicCar == null) return;
+
+            server.SendPacketToAll(new ZG2MarkerStatePacket
+            {
+                CarId = car.logicCar.ID,
+                Marked = ZG2GadgetDetector.HasZG2Board(car)
+            }, reliable: true, excludeSelf: true);
+        }
+
+        private void SendMarkersToPlayer(IPlayer player)
+        {
+            var server = MultiplayerAPI.Server;
+            var spawner = SingletonBehaviour<CarSpawner>.Instance;
+            if (server == null || player == null || spawner == null) return;
+
+            int sent = 0;
+            foreach (var car in spawner.AllCars)
+            {
+                if (car == null || car.logicCar == null) continue;
+                if (!ZG2GadgetDetector.HasZG2Board(car)) continue;
+
+                server.SendPacketToPlayer(new ZG2MarkerStatePacket
+                {
+                    CarId = car.logicCar.ID,
+                    Marked = true
+                }, player);
+                sent++;
+            }
+
+            Main.Log($"ZG2MPBoardSync: Sent {sent} marked cars to player {player.PlayerId} ({player.DisplayName}).");
         }
 
         /// <summary>
@@ -222,12 +299,70 @@ namespace ZG2.MP
         private void OnClientStarted(IClient client)
         {
             client.RegisterPacket<ZG2SettingsSyncPacket>(HandleSettingsReceived);
-            Main.Log("ZG2MPBoardSync: Client started, settings sync handler registered.");
+            client.RegisterPacket<ZG2MarkerStatePacket>(HandleMarkerState);
+
+            var spawner = SingletonBehaviour<CarSpawner>.Instance;
+            if (spawner != null)
+                spawner.CarSpawned += OnCarSpawned;
+
+            Main.Log("ZG2MPBoardSync: Client started, settings and marker handlers registered.");
         }
 
         private void OnClientStopped()
         {
+            UnhookClientEvents();
             Main.Log("ZG2MPBoardSync: Client stopped.");
+        }
+
+        private void UnhookClientEvents()
+        {
+            var spawner = SingletonBehaviour<CarSpawner>.Instance;
+            if (spawner != null)
+                spawner.CarSpawned -= OnCarSpawned;
+
+            hostMarkedCars.Clear();
+        }
+
+        /// <summary>
+        /// Called on the client when the host reports a car's marker state.
+        /// </summary>
+        private void HandleMarkerState(ZG2MarkerStatePacket packet)
+        {
+            if (string.IsNullOrEmpty(packet.CarId)) return;
+
+            if (packet.Marked)
+                hostMarkedCars.Add(packet.CarId);
+            else
+                hostMarkedCars.Remove(packet.CarId);
+
+            // Car may not be spawned yet; OnCarSpawned applies the marker later
+            var car = FindTrainCarById(packet.CarId);
+            if (car == null) return;
+
+            if (packet.Marked)
+                ZG2MapMarkerManager.OnBoardMounted(car);
+            else
+                ZG2MapMarkerManager.OnBoardRemoved(car);
+        }
+
+        private void OnCarSpawned(TrainCar car)
+        {
+            string carId = car?.logicCar?.ID;
+            if (carId != null && hostMarkedCars.Contains(carId))
+                ZG2MapMarkerManager.OnBoardMounted(car);
+        }
+
+        /// <summary>
+        /// Adds markers for all host-marked cars that are currently spawned.
+        /// </summary>
+        private void ApplyHostMarkers()
+        {
+            foreach (var carId in hostMarkedCars)
+            {
+                var car = FindTrainCarById(carId);
+                if (car != null)
+                    ZG2MapMarkerManager.OnBoardMounted(car);
+            }
         }
 
         #endregion
@@ -297,7 +432,13 @@ namespace ZG2.MP
             settings.ShowMapMarkers = packet.ShowMapMarkers;
 
             if (markersChanged)
+            {
                 ZG2MapMarkerManager.OnSettingChanged(settings.ShowMapMarkers);
+
+                // ScanAndAddAll only sees local boards, so re-add the host's markers
+                if (settings.ShowMapMarkers)
+                    ApplyHostMarkers();
+            }
 
             Main.Log($"ZG2MPBoardSync: Settings received from host — " +
                      $"Penalty={settings.PenaltyPercent:F0}%, " +

@@ -95,6 +95,9 @@ namespace ZG2
         public static void NotifyBoardRemoved(string carId)
             => integration.NotifyBoardRemoved(carId);
 
+        public static void BroadcastMarkerState(TrainCar car)
+            => integration.BroadcastMarkerState(car);
+
         public static void BroadcastSettings(float penaltyPercent, int boardsPerStation,
             bool showMapMarkers, bool spawnBoardsAtStations, float checkIntervalSeconds)
             => integration.BroadcastSettings(penaltyPercent, boardsPerStation,
@@ -122,6 +125,7 @@ namespace ZG2
             public bool HasClientReportedBoard(string carId) => false;
             public void NotifyBoardAttached(string carId) { }
             public void NotifyBoardRemoved(string carId) { }
+            public void BroadcastMarkerState(TrainCar car) { }
             public void BroadcastSettings(float penaltyPercent, int boardsPerStation,
                 bool showMapMarkers, bool spawnBoardsAtStations, float checkIntervalSeconds) { }
             public void Initialise() { }

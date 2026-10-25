@@ -27,12 +27,17 @@ namespace ZG2.Patches
                 // Local map marker (works for both host and client)
                 ZG2MapMarkerManager.OnBoardMounted(car);
 
-                // In MP as a client, notify the host so it can track the board
+                // In MP as a client, notify the host so it can track the board;
+                // as the host, tell clients about the new marker
                 if (ZG2MPUtil.IsClient)
                 {
                     string carId = car.logicCar?.ID;
                     if (carId != null)
                         ZG2MPUtil.NotifyBoardAttached(carId);
+                }
+                else
+                {
+                    ZG2MPUtil.BroadcastMarkerState(car);
                 }
             }
         }
@@ -66,12 +71,17 @@ namespace ZG2.Patches
             // Local map marker (works for both host and client)
             ZG2MapMarkerManager.OnBoardRemoved(__state);
 
-            // In MP as a client, notify the host so it can update its tracking
+            // In MP as a client, notify the host so it can update its tracking;
+            // as the host, tell clients the car's new marker state
             if (ZG2MPUtil.IsClient)
             {
                 string carId = __state.logicCar?.ID;
                 if (carId != null)
                     ZG2MPUtil.NotifyBoardRemoved(carId);
+            }
+            else
+            {
+                ZG2MPUtil.BroadcastMarkerState(__state);
             }
         }
     }

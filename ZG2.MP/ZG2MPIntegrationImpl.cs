@@ -50,6 +50,9 @@ namespace ZG2.MP
         public void NotifyBoardRemoved(string carId)
             => boardSync.NotifyBoardRemoved(carId);
 
+        public void BroadcastMarkerState(TrainCar car)
+            => boardSync.BroadcastMarkerState(car);
+
         public void BroadcastSettings(float penaltyPercent, int boardsPerStation,
             bool showMapMarkers, bool spawnBoardsAtStations, float checkIntervalSeconds)
             => boardSync.BroadcastSettings(penaltyPercent, boardsPerStation,

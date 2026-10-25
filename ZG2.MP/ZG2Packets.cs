@@ -25,6 +25,16 @@ namespace ZG2.MP
     }
 
     /// <summary>
+    /// Sent by the host to clients when a car gains or loses its last ZG2 board,
+    /// and once per marked car when a player finishes loading.
+    /// </summary>
+    public class ZG2MarkerStatePacket : IPacket
+    {
+        public string CarId { get; set; }
+        public bool Marked { get; set; }
+    }
+
+    /// <summary>
     /// Sent by the host to clients to synchronise ZG2 settings.
     /// </summary>
     public class ZG2SettingsSyncPacket : IPacket
