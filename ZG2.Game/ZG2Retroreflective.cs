@@ -14,6 +14,10 @@ namespace ZG2
         private const int MaxLights = 8;
         private const float RescanInterval = 0.5f;
 
+        // The range filter over all scene lights is spread over this many frames
+        // so a rescan does not land as one spike.
+        private const int FilterFrames = 10;
+
         // Boards and lights both move (trains, carried lanterns), so the scan-time
         // range filter keeps lights that could come into range before the next scan.
         private const float ScanRangeMargin = 50f;
@@ -35,8 +39,12 @@ namespace ZG2
         // Shared by all boards: the scene is scanned at most every RescanInterval,
         // and light properties are read once per frame, not once per board.
         private static readonly List<ZG2Retroreflective> activeBoards = new List<ZG2Retroreflective>();
-        private static readonly List<Light> nearbyLights = new List<Light>();
         private static readonly List<Vector3> boardCenters = new List<Vector3>();
+        private static List<Light> nearbyLights = new List<Light>();
+        private static List<Light> pendingLights = new List<Light>();
+        private static Light[] allLights = Array.Empty<Light>();
+        private static int filterCursor;
+        private static bool scanInProgress;
         private static float lastScanTime;
         private static bool rescanRequested = true;
         private static LightData[] snapshot = new LightData[32];
@@ -75,7 +83,7 @@ namespace ZG2
             }
         }
 
-        private static void ScanLights()
+        private static void StartScan()
         {
             boardCenters.Clear();
             foreach (var board in activeBoards)
@@ -84,13 +92,28 @@ namespace ZG2
                     boardCenters.Add(board.targetRenderer.bounds.center);
             }
 
-            var allLights = FindObjectsOfType<Light>();
-            nearbyLights.Clear();
-            foreach (var light in allLights)
+            allLights = FindObjectsOfType<Light>();
+            filterCursor = 0;
+            pendingLights.Clear();
+            scanInProgress = true;
+            lastScanTime = Time.unscaledTime;
+        }
+
+        /// <summary>
+        /// Range-filters up to <paramref name="maxCount"/> lights of the current scan.
+        /// The previous result stays in use until the whole pass is done.
+        /// </summary>
+        private static void FilterLights(int maxCount)
+        {
+            int end = Math.Min(filterCursor + maxCount, allLights.Length);
+            for (; filterCursor < end; filterCursor++)
             {
+                var light = allLights[filterCursor];
+                if (light == null) continue;
+
                 if (light.type == LightType.Directional)
                 {
-                    nearbyLights.Add(light);
+                    pendingLights.Add(light);
                     continue;
                 }
                 if (light.type != LightType.Point && light.type != LightType.Spot) continue;
@@ -102,14 +125,18 @@ namespace ZG2
                 {
                     if ((center - lightPos).sqrMagnitude <= reachSqr)
                     {
-                        nearbyLights.Add(light);
+                        pendingLights.Add(light);
                         break;
                     }
                 }
             }
 
-            lastScanTime = Time.unscaledTime;
-            rescanRequested = false;
+            if (filterCursor < allLights.Length) return;
+
+            var done = pendingLights;
+            pendingLights = nearbyLights;
+            nearbyLights = done;
+            scanInProgress = false;
         }
 
         private static void RefreshSnapshot()
@@ -117,8 +144,21 @@ namespace ZG2
             if (snapshotFrame == Time.frameCount) return;
             snapshotFrame = Time.frameCount;
 
-            if (rescanRequested || Time.unscaledTime - lastScanTime >= RescanInterval)
-                ScanLights();
+            // A newly enabled board may have no lights from the last pass,
+            // so it gets a full pass at once instead of waiting FilterFrames.
+            if (rescanRequested)
+            {
+                rescanRequested = false;
+                StartScan();
+                FilterLights(allLights.Length);
+            }
+            else
+            {
+                if (!scanInProgress && Time.unscaledTime - lastScanTime >= RescanInterval)
+                    StartScan();
+                if (scanInProgress)
+                    FilterLights(allLights.Length / FilterFrames + 1);
+            }
 
             if (snapshot.Length < nearbyLights.Count)
                 Array.Resize(ref snapshot, nearbyLights.Count);
