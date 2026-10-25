@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
@@ -10,6 +11,12 @@ namespace ZG2
     /// </summary>
     public static class ZG2StationSpawner
     {
+        public static IEnumerator SpawnAllNextFrame()
+        {
+            yield return null;
+            SpawnAll();
+        }
+
         /// <summary>
         /// Spawns boards at all stations that have not yet been processed.
         /// </summary>

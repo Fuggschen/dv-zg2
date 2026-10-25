@@ -116,12 +116,13 @@ namespace ZG2
                 // 2. Restore save data (must happen before spawning)
                 ZG2SaveManager.Initialise();
 
-                // 3. Spawn boards at stations
-                ZG2StationSpawner.SpawnAll();
-
-                // 4. Start job tracker coroutine
+                // 3. Start job tracker coroutine
                 var tracker = modManagerGO.AddComponent<ZG2JobTracker>();
                 tracker.Initialise();
+
+                // 4. Spawn boards at stations one frame later. The Multiplayer mod hides all
+                //    client world items in its own LoadingFinished handler, which would hide ours too.
+                tracker.StartCoroutine(ZG2StationSpawner.SpawnAllNextFrame());
 
                 // 5. Prepare penalty handler state
                 ZG2PenaltyHandler.Initialise();
