@@ -20,6 +20,7 @@ Shader "Custom/Lit Retroreflective"
 
         _RetroreflectiveMask("Retroreflective Mask", 2D) = "white" {}
         _RetroStrength("Retro Strength", Float) = 2.5
+        _RetroSharpness("Retro Sharpness", Float) = 64
     }
 
     SubShader
@@ -45,6 +46,7 @@ Shader "Custom/Lit Retroreflective"
         half _BumpScale;
         half _OcclusionStrength;
         half _RetroStrength;
+        half _RetroSharpness;
 
         // Light data arrays set per-frame from ZG2Retroreflective via MaterialPropertyBlock
         // _RetroLightPosRange: xyz = world position (or direction for directional), w = range (-1 = directional)
@@ -61,6 +63,8 @@ Shader "Custom/Lit Retroreflective"
             float2 uv_BumpMap;
             float2 uv_RetroreflectiveMask;
             float3 worldPos;
+            float3 worldNormal;
+            INTERNAL_DATA
         };
 
         void surf(Input IN, inout SurfaceOutputStandard o)
@@ -80,6 +84,8 @@ Shader "Custom/Lit Retroreflective"
 
             // Per-pixel retroreflective emission
             float3 viewDir = normalize(_WorldSpaceCameraPos.xyz - IN.worldPos);
+            // Geometric normal, so the normal map does not let light from behind leak in
+            float3 surfaceNormal = normalize(WorldNormalVector(IN, float3(0, 0, 1)));
             half retro = 0;
 
             for (int i = 0; i < _RetroLightCount && i < RETRO_MAX_LIGHTS; i++)
@@ -116,11 +122,16 @@ Shader "Custom/Lit Retroreflective"
                     }
                 }
 
-                // Retroreflective alignment: peaks when lightDir ≈ viewDir
-                float alignment = max(0, dot(lightDir, viewDir));
-                alignment = alignment * alignment * alignment;
+                // Light must hit the front face
+                float facing = saturate(dot(surfaceNormal, lightDir));
+                if (facing <= 0) continue;
 
-                retro += alignment * atten * length(lightColor);
+                // Retroreflective alignment: peaks when lightDir ≈ viewDir.
+                // Real film only returns light within a few degrees of the source,
+                // so a high exponent keeps the glow to near-aligned eyes.
+                float alignment = pow(max(0, dot(lightDir, viewDir)), _RetroSharpness);
+
+                retro += alignment * facing * atten * length(lightColor);
             }
 
             o.Emission = c.rgb * mask * retro * _RetroStrength;
