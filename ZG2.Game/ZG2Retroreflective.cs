@@ -91,7 +91,10 @@ namespace ZG2
                     boardCenters.Add(board.targetRenderer.bounds.center);
             }
 
-            allLights = FindObjectsOfType<Light>();
+            // Includes lights on inactive objects: flashlights switch on via SetActive, and
+            // FindObjectsOfType would only see them at the next scan. Unity 2019 has no
+            // includeInactive overload; prefabs and assets are dropped in the filter.
+            allLights = Resources.FindObjectsOfTypeAll<Light>();
             filterCursor = 0;
             pendingLights.Clear();
             scanInProgress = true;
@@ -111,6 +114,7 @@ namespace ZG2
                 // Only directed beams (headlights, flashlights) make the film glow;
                 // ambient sources like ceiling lamps, lanterns and the sun do not.
                 if (light == null || light.type != LightType.Spot) continue;
+                if (!light.gameObject.scene.IsValid()) continue;
 
                 Vector3 lightPos = light.transform.position;
                 float reach = light.range + ScanRangeMargin;
