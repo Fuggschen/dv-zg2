@@ -127,8 +127,8 @@ namespace ZG2
                 // 5. Prepare penalty handler state
                 ZG2PenaltyHandler.Initialise();
 
-                // 6. Scan for existing mounted boards and add map markers
-                ZG2MapMarkerManager.ScanAndAddAll();
+                // 6. Hook car deletion, scan for existing mounted boards and add map markers
+                ZG2MapMarkerManager.Initialise();
 
                 // 7. Initialise MP integration (client → host notifications)
                 ZG2MPUtil.Initialise();

@@ -85,9 +85,34 @@ namespace ZG2
             }
         }
 
+        /// <summary>
+        /// Hooks car deletion and adds markers for boards already mounted. Call on world load.
+        /// </summary>
+        public static void Initialise()
+        {
+            var spawner = SingletonBehaviour<CarSpawner>.Instance;
+            if (spawner != null)
+                EventHelper.Subscribe(spawner, "CarAboutToBeDeleted", carDeletedHandler);
+
+            ScanAndAddAll();
+        }
+
         public static void Shutdown()
         {
+            var spawner = SingletonBehaviour<CarSpawner>.Instance;
+            if (spawner != null)
+                EventHelper.Unsubscribe(spawner, "CarAboutToBeDeleted", carDeletedHandler);
+
             RemoveAll();
+        }
+
+        private static readonly CarSpawner.CarSpawnEvent carDeletedHandler = OnCarDeleted;
+
+        // Deleted cars usually return to the pool instead of being destroyed,
+        // so ZG2MarkerAnchor never sees its target go null.
+        private static void OnCarDeleted(TrainCar car)
+        {
+            RemoveMarker(car);
         }
 
         private static void AddMarker(TrainCar car)
