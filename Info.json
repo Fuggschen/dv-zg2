@@ -7,6 +7,7 @@
     "EntryMethod": "ZG2.Main.Load",
     "AssemblyName": "ZG2.dll",
     "Requirements": ["custom_item_mod"],
+    "LoadAfter": ["Multiplayer"],
     "MultiplayerCompatibility": "All",
     "HomePage": "https://www.nexusmods.com/derailvalley/mods/1445",
     "Repository": "https://raw.githubusercontent.com/fuggschen/dv-zg2/refs/heads/main/repository.json"
