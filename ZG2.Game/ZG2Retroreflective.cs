@@ -1,4 +1,5 @@
-using System.Collections;
+using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 namespace ZG2
@@ -11,15 +12,43 @@ namespace ZG2
     public class ZG2Retroreflective : MonoBehaviour
     {
         private const int MaxLights = 8;
+        private const float RescanInterval = 0.5f;
+
+        // Boards and lights both move (trains, carried lanterns), so the scan-time
+        // range filter keeps lights that could come into range before the next scan.
+        private const float ScanRangeMargin = 50f;
 
         private static readonly int LightCountID = Shader.PropertyToID("_RetroLightCount");
         private static readonly int LightPosRangeID = Shader.PropertyToID("_RetroLightPosRange");
         private static readonly int LightColorID = Shader.PropertyToID("_RetroLightColor");
         private static readonly int LightSpotDataID = Shader.PropertyToID("_RetroLightSpotData");
 
+        private struct LightData
+        {
+            public Vector4 PosRange;
+            public Vector4 Color;
+            public Vector4 SpotData;
+            public float Strength;
+            public bool Directional;
+        }
+
+        // Shared by all boards: the scene is scanned at most every RescanInterval,
+        // and light properties are read once per frame, not once per board.
+        private static readonly List<ZG2Retroreflective> activeBoards = new List<ZG2Retroreflective>();
+        private static readonly List<Light> nearbyLights = new List<Light>();
+        private static readonly List<Vector3> boardCenters = new List<Vector3>();
+        private static float lastScanTime;
+        private static bool rescanRequested = true;
+        private static LightData[] snapshot = new LightData[32];
+        private static int snapshotCount;
+        private static int snapshotFrame = -1;
+
+        private static readonly int[] slotLights = new int[MaxLights];
+        private static readonly float[] slotScores = new float[MaxLights];
+
         private Renderer targetRenderer;
         private MaterialPropertyBlock mpb;
-        private Light[] cachedLights;
+        private int lastCount = -1;
 
         // Pre-allocated arrays to avoid GC each frame
         private readonly Vector4[] posRange = new Vector4[MaxLights];
@@ -30,12 +59,14 @@ namespace ZG2
         {
             targetRenderer = GetComponentInChildren<Renderer>();
             mpb = new MaterialPropertyBlock();
-            StartCoroutine(RefreshLightsCoroutine());
+            lastCount = -1;
+            activeBoards.Add(this);
+            rescanRequested = true;
         }
 
         private void OnDisable()
         {
-            StopAllCoroutines();
+            activeBoards.Remove(this);
             if (targetRenderer != null)
             {
                 targetRenderer.GetPropertyBlock(mpb);
@@ -44,65 +75,142 @@ namespace ZG2
             }
         }
 
-        private IEnumerator RefreshLightsCoroutine()
+        private static void ScanLights()
         {
-            while (true)
+            boardCenters.Clear();
+            foreach (var board in activeBoards)
             {
-                cachedLights = FindObjectsOfType<Light>();
-                yield return new WaitForSeconds(0.5f);
+                if (board.targetRenderer != null)
+                    boardCenters.Add(board.targetRenderer.bounds.center);
+            }
+
+            var allLights = FindObjectsOfType<Light>();
+            nearbyLights.Clear();
+            foreach (var light in allLights)
+            {
+                if (light.type == LightType.Directional)
+                {
+                    nearbyLights.Add(light);
+                    continue;
+                }
+                if (light.type != LightType.Point && light.type != LightType.Spot) continue;
+
+                Vector3 lightPos = light.transform.position;
+                float reach = light.range + ScanRangeMargin;
+                float reachSqr = reach * reach;
+                foreach (var center in boardCenters)
+                {
+                    if ((center - lightPos).sqrMagnitude <= reachSqr)
+                    {
+                        nearbyLights.Add(light);
+                        break;
+                    }
+                }
+            }
+
+            lastScanTime = Time.unscaledTime;
+            rescanRequested = false;
+        }
+
+        private static void RefreshSnapshot()
+        {
+            if (snapshotFrame == Time.frameCount) return;
+            snapshotFrame = Time.frameCount;
+
+            if (rescanRequested || Time.unscaledTime - lastScanTime >= RescanInterval)
+                ScanLights();
+
+            if (snapshot.Length < nearbyLights.Count)
+                Array.Resize(ref snapshot, nearbyLights.Count);
+
+            snapshotCount = 0;
+            foreach (var light in nearbyLights)
+            {
+                if (light == null || !light.isActiveAndEnabled) continue;
+
+                Color c = light.color * light.intensity;
+                var data = new LightData
+                {
+                    Color = new Vector4(c.r, c.g, c.b, 0f),
+                    Strength = new Vector3(c.r, c.g, c.b).magnitude,
+                    Directional = light.type == LightType.Directional
+                };
+
+                if (data.Directional)
+                {
+                    Vector3 dir = -light.transform.forward;
+                    data.PosRange = new Vector4(dir.x, dir.y, dir.z, -1f);
+                    data.SpotData = new Vector4(0f, 0f, 0f, -1f);
+                }
+                else
+                {
+                    Vector3 pos = light.transform.position;
+                    data.PosRange = new Vector4(pos.x, pos.y, pos.z, light.range);
+
+                    if (light.type == LightType.Spot)
+                    {
+                        Vector3 fwd = light.transform.forward;
+                        float cosHalf = Mathf.Cos(light.spotAngle * 0.5f * Mathf.Deg2Rad);
+                        data.SpotData = new Vector4(fwd.x, fwd.y, fwd.z, cosHalf);
+                    }
+                    else
+                    {
+                        data.SpotData = new Vector4(0f, 0f, 0f, -1f);
+                    }
+                }
+
+                snapshot[snapshotCount++] = data;
             }
         }
 
         private void LateUpdate()
         {
-            if (targetRenderer == null || cachedLights == null) return;
+            if (targetRenderer == null || !targetRenderer.isVisible) return;
+
+            RefreshSnapshot();
 
             Vector3 boardPos = targetRenderer.bounds.center;
             int count = 0;
 
-            for (int i = 0; i < cachedLights.Length && count < MaxLights; i++)
+            // Keep the MaxLights strongest contributions, sorted by score. Directional
+            // lights always win; point and spot lights rank by attenuation * strength.
+            for (int i = 0; i < snapshotCount; i++)
             {
-                var light = cachedLights[i];
-                if (light == null || !light.isActiveAndEnabled) continue;
-
-                switch (light.type)
+                float score;
+                if (snapshot[i].Directional)
                 {
-                    case LightType.Directional:
-                    {
-                        Vector3 dir = -light.transform.forward;
-                        posRange[count] = new Vector4(dir.x, dir.y, dir.z, -1f);
-                        Color c = light.color * light.intensity;
-                        colors[count] = new Vector4(c.r, c.g, c.b, 0f);
-                        spotData[count] = new Vector4(0f, 0f, 0f, -1f);
-                        count++;
-                        break;
-                    }
-
-                    case LightType.Point:
-                    case LightType.Spot:
-                    {
-                        float dist = Vector3.Distance(light.transform.position, boardPos);
-                        if (dist > light.range) continue;
-
-                        Vector3 pos = light.transform.position;
-                        posRange[count] = new Vector4(pos.x, pos.y, pos.z, light.range);
-                        Color c = light.color * light.intensity;
-                        colors[count] = new Vector4(c.r, c.g, c.b, 0f);
-
-                        if (light.type == LightType.Spot)
-                        {
-                            Vector3 fwd = light.transform.forward;
-                            float cosHalf = Mathf.Cos(light.spotAngle * 0.5f * Mathf.Deg2Rad);
-                            spotData[count] = new Vector4(fwd.x, fwd.y, fwd.z, cosHalf);
-                        }
-                        else
-                        {
-                            spotData[count] = new Vector4(0f, 0f, 0f, -1f);
-                        }
-                        count++;
-                        break;
-                    }
+                    score = float.MaxValue;
                 }
+                else
+                {
+                    Vector4 pr = snapshot[i].PosRange;
+                    float distSqr = (new Vector3(pr.x, pr.y, pr.z) - boardPos).sqrMagnitude;
+                    float rangeSqr = pr.w * pr.w;
+                    if (distSqr > rangeSqr) continue;
+                    score = (1f - distSqr / rangeSqr) * snapshot[i].Strength;
+                }
+
+                if (count == MaxLights && score <= slotScores[MaxLights - 1]) continue;
+
+                int slot = count < MaxLights ? count++ : MaxLights - 1;
+                while (slot > 0 && slotScores[slot - 1] < score)
+                {
+                    slotScores[slot] = slotScores[slot - 1];
+                    slotLights[slot] = slotLights[slot - 1];
+                    slot--;
+                }
+                slotScores[slot] = score;
+                slotLights[slot] = i;
+            }
+
+            if (count == 0 && lastCount == 0) return;
+            lastCount = count;
+
+            for (int s = 0; s < count; s++)
+            {
+                posRange[s] = snapshot[slotLights[s]].PosRange;
+                colors[s] = snapshot[slotLights[s]].Color;
+                spotData[s] = snapshot[slotLights[s]].SpotData;
             }
 
             targetRenderer.GetPropertyBlock(mpb);
