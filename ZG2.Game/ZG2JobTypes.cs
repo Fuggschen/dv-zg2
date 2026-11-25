@@ -39,6 +39,7 @@ namespace ZG2
             public string Name;      // readable name; "loc:<key>" = game localisation key (translated on display)
             public string ModName;   // name of the mod that adds it
             public bool Installed;   // found in a loaded mod this session
+            public Func<string> NameFunc; // live, translated name from the mod's own API (runtime only)
 
             public bool IsVariant => Number != null && Number.StartsWith("@");
 
@@ -46,6 +47,13 @@ namespace ZG2
             {
                 get
                 {
+                    if (NameFunc != null)
+                    {
+                        string n = null;
+                        try { n = NameFunc(); } catch { }
+                        if (!string.IsNullOrEmpty(n))
+                            return string.IsNullOrEmpty(ModName) ? n : $"{ModName}: {n}";
+                    }
                     if (string.IsNullOrEmpty(Name)) return ModName ?? string.Empty;
                     if (!Name.StartsWith("loc:")) return Name;
                     string key = Name.Substring(4);
@@ -61,7 +69,8 @@ namespace ZG2
                 {
                     string name = DisplayName;
                     if (string.IsNullOrEmpty(name))
-                        return string.IsNullOrEmpty(Abbrev) ? ZG2Loc.T("Unbekannter Mod-Jobtyp", "Unknown mod job type") : Abbrev;
+                        return string.IsNullOrEmpty(Abbrev) ? ZG2Loc.T("Unbekannter Mod-Jobtyp", "Unknown mod job type")
+                            : ZG2Loc.T("Mod-Jobtyp", "Mod job type") + $" ({Abbrev})";
                     return string.IsNullOrEmpty(Abbrev) ? name : $"{name} ({Abbrev})";
                 }
             }
@@ -215,8 +224,28 @@ namespace ZG2
 
                     string modName = entry.Info?.DisplayName ?? entry.Info?.Id ?? "Mod";
                     if (modName.IndexOf(' ') < 0) modName = Humanize(modName); // "CircleHaulJobs" → "Circle Haul Jobs"
-                    // Abbreviation straight from the mod's code (its IdGenerator.GenerateJobID patch)
-                    var ilAbbrevs = FindAbbrevsInIdPatch(entry.Assembly);
+                    // 0) The mod's own job kind API (e.g. TrainServiceRework.JobKinds) – the API is the
+                    //    complete truth for that mod, so the guesswork below is skipped for it.
+                    int providersBefore = providers.Count;
+                    if (ReadKindApi(entry.Assembly, modName)) changed = true;
+                    bool hasKindApi = providers.Count > providersBefore;
+                    if (string.Equals(entry.Info?.Id, "TrainServiceRework", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (hasKindApi)
+                            Main.Log($"Zg2: TrainServiceRework {entry.Info.Version}: job kind API found.");
+                        else
+                        {
+                            Main.LogWarning($"Zg2: TrainServiceRework {entry.Info.Version} has no job kind API (TrainServiceRework.JobKinds) – using the built-in list of its job kinds.");
+                            if (RegisterTsrFallback(modName)) changed = true;
+                            hasKindApi = true; // no guessing from IL for TSR
+                        }
+                    }
+
+                    // 1) Job ID codes the mod announces itself (see ReadAnnouncedCodes)
+                    if (ReadAnnouncedCodes(entry.Assembly, modName)) changed = true;
+
+                    // 2) Fallback: abbreviations from the mod's IdGenerator patch code
+                    var ilAbbrevs = hasKindApi ? new List<string>() : FindAbbrevsInIdPatch(entry.Assembly);
                     if (found.Count == 0 && ilAbbrevs.Count == 0) continue;
 
                     int index = 0;
@@ -231,7 +260,7 @@ namespace ZG2
                             changed = true;
                             Main.Log($"Zg2: job type '{name}' detected in mod {entry.Info?.Id}.");
                         }
-                        if (t.Name != name) { t.Name = name; changed = true; }
+                        if (t.Name != name && !announcedKeys.Contains(num)) { t.Name = name; changed = true; }
                         if (t.ModName != modName) { t.ModName = modName; changed = true; }
                         t.Installed = true;
 
@@ -268,7 +297,8 @@ namespace ZG2
                                 changed = true;
                                 Main.Log($"Zg2: job variant {ab} detected in mod {entry.Info?.Id}.");
                             }
-                            if (!string.IsNullOrEmpty(name) && v.Name != name) { v.Name = name; changed = true; }
+                            // announced names (JobIdCodes) win over this order-based guess
+                            if (!string.IsNullOrEmpty(name) && string.IsNullOrEmpty(v.Name)) { v.Name = name; changed = true; }
                             if (v.ModName != modName) { v.ModName = modName; changed = true; }
                             v.Installed = true;
                         }
@@ -325,6 +355,225 @@ namespace ZG2
                 if (Main.Settings != null && Main.Settings.DebugLogging) Main.Log($"Zg2: IL scan failed: {ex.Message}");
             }
             return result;
+        }
+
+        /// <summary>A mod's job kind API (static class "JobKinds" with GetKindCodes / GetKindCodeFromJobId …).</summary>
+        private class KindProvider
+        {
+            public string ModName;
+            public MethodInfo GetCodeFromId;   // string GetKindCodeFromJobId(string jobId)
+            public MethodInfo GetName;         // string GetLocalizedName(string code)
+            public MethodInfo IsHaul;          // bool IsHaul(string code)
+
+            public string CodeOf(string jobId)
+            {
+                if (GetCodeFromId == null || string.IsNullOrEmpty(jobId)) return null;
+                try { return GetCodeFromId.Invoke(null, new object[] { jobId }) as string; }
+                catch { return null; }
+            }
+        }
+
+        private static readonly List<KindProvider> providers = new List<KindProvider>();
+
+        /// <summary>Job kind code of a job according to the other mods' APIs, or null.</summary>
+        private static string ProviderCode(string jobId)
+        {
+            for (int i = 0; i < providers.Count; i++)
+            {
+                string code = providers[i].CodeOf(jobId);
+                if (!string.IsNullOrEmpty(code)) return code;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Reads a job kind API from a mod: a public static class named "JobKinds" with
+        /// <c>string[] GetKindCodes()</c>, <c>string GetKindCodeFromJobId(string)</c> and optionally
+        /// <c>string GetLocalizedName(string)</c> / <c>bool IsHaul(string)</c> (TrainServiceRework provides this).
+        /// Only primitive types – no reference to the other mod. Kinds that drive between stations
+        /// (IsHaul) are switched on when they are found for the first time, shunting kinds stay off.
+        /// </summary>
+        /// <summary>
+        /// Job kinds of TrainServiceRework versions without the JobKinds API. The codes are stable
+        /// (TSR documents them as never renamed); names are the English booklet names.
+        /// </summary>
+        private static bool RegisterTsrFallback(string modName)
+        {
+            var kinds = new[]
+            {
+                new[] { "SH", "Special Haul", "1" },
+                new[] { "MH", "Maintenance Haul", "1" },
+                new[] { "SO", "Shunting Out", "0" },
+                new[] { "MS", "Maintenance", "0" },
+                new[] { "SS", "Shunting Sorting", "0" },
+            };
+            bool changed = false;
+            foreach (var k in kinds)
+            {
+                string key = VariantKey(k[0]);
+                bool isNew = !known.TryGetValue(key, out var t);
+                if (isNew)
+                {
+                    t = new ModType { Number = key };
+                    known[key] = t;
+                    changed = true;
+                }
+                if (t.Abbrev != k[0]) { t.Abbrev = k[0]; changed = true; }
+                if (t.ModName != modName) { t.ModName = modName; changed = true; }
+                if (string.IsNullOrEmpty(t.Name) || t.Name.StartsWith("loc:")) { t.Name = k[1]; changed = true; }
+                t.Installed = true;
+                if (isNew && k[2] == "1") Set(key, true); // first time: hauls on, shunting off
+            }
+            return changed;
+        }
+
+        private static bool ReadKindApi(Assembly asm, string modName)
+        {
+            bool changed = false;
+            var candidates = new List<Type>();
+            var direct = asm.GetType("TrainServiceRework.JobKinds", false);
+            if (direct != null) candidates.Add(direct);
+            foreach (var t in SafeTypes(asm))
+                if (t.Name == "JobKinds" && t != direct) candidates.Add(t);
+
+            foreach (var type in candidates)
+            {
+                if (!type.IsAbstract || !type.IsSealed) continue; // static class
+                MethodInfo getCodes, fromId;
+                try
+                {
+                    const BindingFlags f = BindingFlags.Public | BindingFlags.Static;
+                    getCodes = type.GetMethod("GetKindCodes", f, null, Type.EmptyTypes, null);
+                    fromId = type.GetMethod("GetKindCodeFromJobId", f, null, new[] { typeof(string) }, null);
+                    if (getCodes == null || fromId == null) continue;
+
+                    var provider = new KindProvider
+                    {
+                        ModName = modName,
+                        GetCodeFromId = fromId,
+                        GetName = type.GetMethod("GetLocalizedName", f, null, new[] { typeof(string) }, null),
+                        IsHaul = type.GetMethod("IsHaul", f, null, new[] { typeof(string) }, null)
+                    };
+                    providers.Add(provider);
+
+                    if (!(getCodes.Invoke(null, null) is string[] codes)) continue;
+                    foreach (var rawCode in codes)
+                    {
+                        if (string.IsNullOrEmpty(rawCode)) continue;
+                        string code = rawCode.Trim();
+                        string key = VariantKey(code);
+                        bool isNew = !known.TryGetValue(key, out var t);
+                        if (isNew)
+                        {
+                            t = new ModType { Number = key, Name = string.Empty };
+                            known[key] = t;
+                            changed = true;
+                            Main.Log($"Zg2: job kind {code} provided by {modName}.");
+                        }
+                        if (t.Abbrev != code) { t.Abbrev = code; changed = true; }
+                        if (t.ModName != modName) { t.ModName = modName; changed = true; }
+                        t.Installed = true;
+
+                        var nameMethod = provider.GetName;
+                        string c = code;
+                        if (nameMethod != null)
+                            t.NameFunc = () => nameMethod.Invoke(null, new object[] { c }) as string;
+
+                        // first time: hauls on, shunting off
+                        if (isNew && provider.IsHaul != null)
+                        {
+                            bool haul = false;
+                            try { haul = provider.IsHaul.Invoke(null, new object[] { code }) is bool b && b; } catch { }
+                            if (haul) Set(key, true);
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Main.LogWarning($"Zg2: job kind API of {modName} could not be read: {ex.Message}");
+                }
+            }
+            return changed;
+        }
+
+        /// <summary>Names of the static member another mod can use to announce its job ID codes.</summary>
+        private static readonly string[] AnnounceMemberNames = { "JobIdCodes", "ZG2JobCodes" };
+        private static readonly HashSet<string> announcedKeys = new HashSet<string>();
+
+        /// <summary>
+        /// Interface for other mods – no reference to ZG2 needed. A mod declares anywhere in its assembly
+        /// a public static string array (field, property or parameterless method) named <c>JobIdCodes</c>:
+        /// <code>
+        /// public static readonly string[] JobIdCodes =
+        /// {
+        ///     "SH|Transport|train_service_rework/job/damaged_freight",   // CODE | base job type | name (loc key or text)
+        ///     "SO|ShuntingUnload|train_service_rework/job/shunting_out",
+        /// };
+        /// </code>
+        /// Base job type: vanilla enum name (Transport, EmptyHaul, ShuntingLoad, ShuntingUnload) for jobs that
+        /// only use their own ID code, or the number of an own JobType. Name: a localisation key (contains "/")
+        /// or plain text; optional. ZG2 reads this once at game start, already in the main menu.
+        /// </summary>
+        private static bool ReadAnnouncedCodes(Assembly asm, string modName)
+        {
+            bool changed = false;
+            foreach (var type in SafeTypes(asm))
+            {
+                foreach (var memberName in AnnounceMemberNames)
+                {
+                    IEnumerable<string> entries = null;
+                    try
+                    {
+                        const BindingFlags f = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.DeclaredOnly;
+                        object value = type.GetField(memberName, f)?.GetValue(null)
+                                       ?? type.GetProperty(memberName, f)?.GetValue(null, null);
+                        if (value == null)
+                        {
+                            var m = type.GetMethod(memberName, f, null, Type.EmptyTypes, null);
+                            if (m != null) value = m.Invoke(null, null);
+                        }
+                        entries = value as IEnumerable<string>;
+                    }
+                    catch { }
+                    if (entries == null) continue;
+
+                    foreach (var raw in entries)
+                        if (RegisterAnnounced(raw, modName)) changed = true;
+                }
+            }
+            return changed;
+        }
+
+        private static bool RegisterAnnounced(string raw, string modName)
+        {
+            if (string.IsNullOrEmpty(raw)) return false;
+            var f = raw.Split('|');
+            string code = f[0].Trim().ToUpperInvariant();
+            string baseType = f.Length > 1 ? f[1].Trim() : string.Empty;
+            string nameRaw = f.Length > 2 ? f[2].Trim() : string.Empty;
+            if (code.Length == 0 || Vanilla.Exists(v => v.Abbrev == code)) return false;
+
+            string name = nameRaw.Length == 0 ? string.Empty : (nameRaw.Contains("/") ? "loc:" + nameRaw : nameRaw);
+
+            // Own JobType number → set the abbreviation of that type; otherwise a variant of a vanilla type
+            string key = int.TryParse(baseType, out int num) && !Enum.IsDefined(typeof(JobType), (JobType)num)
+                ? num.ToString()
+                : VariantKey(code);
+
+            bool changed = false;
+            if (!known.TryGetValue(key, out var t))
+            {
+                t = new ModType { Number = key };
+                known[key] = t;
+                changed = true;
+                Main.Log($"Zg2: job code {code} announced by {modName}.");
+            }
+            if (t.Abbrev != code) { t.Abbrev = code; changed = true; }
+            if (name.Length > 0) announcedKeys.Add(key);
+            if (name.Length > 0 && t.Name != name) { t.Name = name; changed = true; }
+            if (t.ModName != modName) { t.ModName = modName; changed = true; }
+            t.Installed = true;
+            return changed;
         }
 
         /// <summary>Methods called (call/callvirt) in a method body.</summary>
@@ -539,6 +788,7 @@ namespace ZG2
                 SeenTypes[key] = abbrev;
 
             if (Main.Settings == null || abbrev.Length == 0) return;
+            if (ProviderCode(id) != null) return; // the mod's own API already knows this job kind
             LoadKnown();
 
             // Vanilla type with a foreign job ID code (another mod renamed the ID) → variant
@@ -609,6 +859,10 @@ namespace ZG2
         {
             if (job == null) return false;
             var keys = GetKeys();
+
+            // Job kind according to the other mod's own API (e.g. TrainServiceRework: SH, MH, SO, MS, SS)
+            string kind = ProviderCode(job.ID);
+            if (!string.IsNullOrEmpty(kind)) return keys.Contains(VariantKey(kind));
 
             // A known variant (own job ID code on a vanilla type) is decided by its own switch only
             string jobAbbrev = AbbrevOf(job);
