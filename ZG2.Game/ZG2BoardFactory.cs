@@ -36,6 +36,34 @@ namespace ZG2
 
         public static bool IsInitialised => customItems.Count > 0;
 
+        /// <summary>Worn variants are station-only: they never appear on shop shelves.</summary>
+        public static readonly string[] StationPrefabNames = { PREFAB_NAME_OLD_WORN, PREFAB_NAME_MODERN_WORN };
+
+        private static Material[] wornMaterialsSmall;
+        private static Material[] wornMaterialsLarge;
+
+        /// <summary>Materials of the worn variant (used when a new board has aged enough).</summary>
+        public static Material[] GetWornMaterials(bool large)
+        {
+            var cached = large ? wornMaterialsLarge : wornMaterialsSmall;
+            if (cached != null) return cached;
+
+            var prefab = GetPrefab(large ? PREFAB_NAME_MODERN_WORN : PREFAB_NAME_OLD_WORN);
+            var r = prefab != null ? prefab.GetComponentInChildren<Renderer>(true) : null;
+            cached = r != null ? r.sharedMaterials : System.Array.Empty<Material>();
+            if (large) wornMaterialsLarge = cached; else wornMaterialsSmall = cached;
+            return cached;
+        }
+
+        /// <summary>True for custom items that must not be put on shop shelves (worn boards).</summary>
+        public static bool IsHiddenFromShops(CustomItem item)
+        {
+            if (item == null) return false;
+            foreach (var name in StationPrefabNames)
+                if (customItems.TryGetValue(name, out var ci) && ReferenceEquals(ci, item)) return true;
+            return false;
+        }
+
         /// <summary>
         /// Loads the AssetBundle and creates <see cref="CustomItem"/> instances
         /// registered with <see cref="ItemModsFinder.CustomItems"/>.
@@ -80,7 +108,8 @@ namespace ZG2
                 "Zugschlusstafel (Large)", "Large train end board (Zugschlusstafel).",
                 shopAmount: 10, iconStandard: iconLargeNew, iconDropped: iconLargeDrop);
 
-            // Worn/weathered variants — station spawns only (Amount=0 keeps save/load but no shop stock)
+            // Worn/weathered variants — station spawns only. Amount=0 and ShopHidePatch keep them
+            // out of the shops entirely (no "sold out" shelf); they stay registered for save/load.
             RegisterItem(PREFAB_NAME_OLD_WORN, ZG2Board.BoardVariant.OldWorn,
                 "Zugschlusstafel (Small, worn)", "Worn small train end board (Zugschlusstafel).",
                 shopAmount: 0, iconStandard: iconSmallOld, iconDropped: iconSmallDrop);
@@ -114,6 +143,8 @@ namespace ZG2
         public static void Shutdown()
         {
             customItems.Clear();
+            wornMaterialsSmall = null;
+            wornMaterialsLarge = null;
 
             if (gadgetPrefabRoot != null)
             {
@@ -192,7 +223,7 @@ namespace ZG2
             // ── Set up gadget components (custom_item_mod skipped this since no stubs) ──
             // For large boards, shift the pivot toward the bottom so they can mount higher.
             bool isLarge = prefabName == PREFAB_NAME_MODERN || prefabName == PREFAB_NAME_MODERN_WORN;
-            SetupGadgetComponents(customItem.ItemPrefab, prefabName, pivotOffsetUp: isLarge ? 0.2f : 0f);
+            SetupGadgetComponents(customItem.ItemPrefab, prefabName, isLarge, pivotOffsetUp: isLarge ? 0.2f : 0f);
 
             // ── Inject into custom_item_mod's item list for shop + save/load integration ──
             ItemModsFinder.CustomItems.Add(customItem);
@@ -232,7 +263,7 @@ namespace ZG2
         /// Shifts the visual upward in gadget space (Y+ = up along surface),
         /// effectively moving the pivot/attachment point toward the bottom of the board.
         /// </param>
-        private static void SetupGadgetComponents(GameObject itemPrefab, string prefabName, float pivotOffsetUp = 0f)
+        private static void SetupGadgetComponents(GameObject itemPrefab, string prefabName, bool isLarge, float pivotOffsetUp = 0f)
         {
             // ── Create gadget template as a standalone object under our hidden root ──
             var gadgetTemplate = new GameObject($"{prefabName}_Gadget");
@@ -325,6 +356,7 @@ namespace ZG2
                 gadgetBase.highlightMeshes = new[] { gadgetMesh };
 
                 visualChild.AddComponent<ZG2Retroreflective>();
+                visualChild.AddComponent<ZG2GadgetVisual>().Large = isLarge;
             }
 
             // Add collider on the visual child (offset along with the mesh)

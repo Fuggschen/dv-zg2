@@ -1,79 +1,99 @@
+using System.Collections.Generic;
 using DV.Customization;
 using DV.Customization.Gadgets;
 using UnityEngine;
 
 namespace ZG2
 {
+    /// <summary>Position and facing (surface normal, gadget Z+) of a mounted board.</summary>
+    public struct ZG2BoardPose
+    {
+        public Vector3 Position;
+        public Vector3 Forward;
+
+        public ZG2BoardPose(Vector3 position, Vector3 forward)
+        {
+            Position = position;
+            Forward = forward;
+        }
+    }
+
     /// <summary>
-    /// Utility class to detect ZG2 board gadgets on a train car.
+    /// Finds ZG2 board gadgets mounted on a train car.
+    /// Only real gadgets count – board ITEMS lying in a car interior are ignored
+    /// (the old interior fallback allowed "a board anywhere on the train").
     /// </summary>
     public static class ZG2GadgetDetector
     {
-        /// <summary>
-        /// Returns true if the given <see cref="TrainCar"/> has at least one ZG2 board
-        /// gadget placed on it (via the gadget customisation system).
-        /// </summary>
+        private static readonly List<ZG2BoardPose> tmpLocal = new List<ZG2BoardPose>();
+
+        /// <summary>True if at least one ZG2 board gadget is mounted on the car (local or client-reported).</summary>
         public static bool HasZG2Board(TrainCar car)
         {
             if (car == null) return false;
 
-            // Primary approach: use the Customization system's list of linked customizers
-            var customization = car.GetComponent<TrainCarCustomization>();
-            if (customization != null)
+            var customizers = GetCustomizers(car);
+            if (customizers != null)
             {
-                // Customizers is a ReadOnlyCollection<CustomizerBase> (publicized via Krafs)
-                var customizers = customization.Customizers;
-                if (customizers != null)
+                for (int i = 0; i < customizers.Count; i++)
                 {
-                    for (int i = 0; i < customizers.Count; i++)
-                    {
-                        if (customizers[i] is GadgetBase gadget && ZG2Board.IsZG2Board(gadget))
-                        {
-                            return true;
-                        }
-                    }
+                    if (customizers[i] is GadgetBase gadget && ZG2Board.IsZG2Board(gadget))
+                        return true;
                 }
             }
 
-            // Fallback: search the car's interior hierarchy directly for any ZG2Board component.
-            // This catches boards that might be placed but not formally linked to the
-            // Customization system (e.g. during a transition or if parenting differs).
-            if (car.interior != null)
-            {
-                var boards = car.interior.GetComponentsInChildren<ZG2Board>(includeInactive: false);
-                if (boards != null && boards.Length > 0)
-                {
-                    return true;
-                }
-            }
-
-            // Fallback for multiplayer: check if any client has reported a board on this car.
-            // In MP, a client's gadget placement only exists on the client's scene — the host
-            // won't see it in the TrainCarCustomization or hierarchy. The virtual registry
-            // tracks client-reported placements so detection works host-side.
             if (ZG2MPUtil.IsMultiplayerActive)
             {
                 string carId = car.logicCar?.ID;
                 if (carId != null && ZG2MPUtil.HasClientReportedBoard(carId))
-                {
                     return true;
-                }
             }
 
             return false;
         }
 
         /// <summary>
-        /// Checks whether the free (uncoupled) end of a trainset's end car
-        /// has a ZG2 board. This is more precise but optional for v1 —
-        /// we check if the car has a board anywhere.
+        /// Collects world-space poses of all ZG2 boards mounted on the car.
+        /// Includes boards that MP clients reported (stored car-local on the host).
         /// </summary>
-        public static bool HasZG2BoardOnFreeEnd(Trainset trainset, bool front)
+        public static void GetBoardPoses(TrainCar car, List<ZG2BoardPose> result)
         {
-            if (trainset == null) return false;
+            result.Clear();
+            if (car == null) return;
 
-            var endCar = front ? trainset.firstCar : trainset.lastCar;
-            return HasZG2Board(endCar);
+            var customizers = GetCustomizers(car);
+            if (customizers != null)
+            {
+                for (int i = 0; i < customizers.Count; i++)
+                {
+                    if (customizers[i] is GadgetBase gadget && gadget != null && ZG2Board.IsZG2Board(gadget))
+                    {
+                        var t = gadget.transform;
+                        result.Add(new ZG2BoardPose(t.position, t.forward));
+                    }
+                }
+            }
+
+            if (ZG2MPUtil.IsMultiplayerActive)
+            {
+                string carId = car.logicCar?.ID;
+                if (carId != null)
+                {
+                    tmpLocal.Clear();
+                    ZG2MPUtil.GetClientBoardPoses(carId, tmpLocal);
+                    var ct = car.transform;
+                    foreach (var local in tmpLocal)
+                        result.Add(new ZG2BoardPose(ct.TransformPoint(local.Position), ct.TransformDirection(local.Forward)));
+                }
+            }
+        }
+
+        // Customizers is a ReadOnlyCollection<CustomizerBase>; the non-generic IList view avoids
+        // depending on the exact element type name.
+        private static System.Collections.IList GetCustomizers(TrainCar car)
+        {
+            var customization = car.GetComponent<TrainCarCustomization>();
+            return customization != null ? customization.Customizers : null;
         }
     }
 }

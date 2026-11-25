@@ -12,7 +12,7 @@ namespace ZG2
     public class ZG2Retroreflective : MonoBehaviour
     {
         private const int MaxLights = 8;
-        private const float RescanInterval = 0.5f;
+        private const float RescanInterval = 2f; // was 0.5 s – FindObjectsOfTypeAll<Light> is expensive
 
         // The range filter over all scene lights is spread over this many frames
         // so a rescan does not land as one spike.
