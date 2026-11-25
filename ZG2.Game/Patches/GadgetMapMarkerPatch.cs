@@ -1,14 +1,14 @@
 using DV.Customization;
 using DV.Customization.Gadgets;
 using HarmonyLib;
+using UnityEngine;
 
 namespace ZG2.Patches
 {
     /// <summary>
-    /// Detects when a ZG2 board gadget is placed on a train car.
-    /// Postfix on <see cref="GadgetItem.Place"/> — after placement is complete,
-    /// checks if the gadget is a ZG2 board and notifies the map marker manager.
-    /// In multiplayer, also notifies the host via <see cref="ZG2MPBoardSync"/>.
+    /// Postfix on <see cref="GadgetItem.Place"/>: a ZG2 board was mounted.
+    /// Updates the map marker, carries the board's wear over to the gadget and – on MP clients –
+    /// reports the car-local pose to the host, which needs it for the train end validation.
     /// </summary>
     [HarmonyPatch(typeof(GadgetItem), nameof(GadgetItem.Place))]
     public static class GadgetPlacedPatch
@@ -16,72 +16,83 @@ namespace ZG2.Patches
         [HarmonyPostfix]
         public static void Postfix(GadgetBase __result, Customization destination)
         {
-            if (!Main.Enabled) return;
-            if (__result == null) return;
+            if (!Main.Enabled || __result == null) return;
             if (!ZG2Board.IsZG2Board(__result)) return;
+            if (!(destination is TrainCarCustomization trainCustom) || trainCustom.TrainCar == null) return;
 
-            if (destination is TrainCarCustomization trainCustom && trainCustom.TrainCar != null)
+            var car = trainCustom.TrainCar;
+
+            ZG2BoardWear.OnBoardMounted(__result);
+            ZG2MapMarkerManager.OnBoardMounted(car);
+
+            if (ZG2MPUtil.IsClient)
             {
-                var car = trainCustom.TrainCar;
-
-                // Local map marker (works for both host and client)
-                ZG2MapMarkerManager.OnBoardMounted(car);
-
-                // In MP as a client, notify the host so it can track the board;
-                // as the host, tell clients about the new marker
-                if (ZG2MPUtil.IsClient)
+                string carId = car.logicCar?.ID;
+                if (carId != null)
                 {
-                    string carId = car.logicCar?.ID;
-                    if (carId != null)
-                        ZG2MPUtil.NotifyBoardAttached(carId);
+                    var ct = car.transform;
+                    var gt = __result.transform;
+                    ZG2MPUtil.NotifyBoardAttached(carId, __result.GetInstanceID(),
+                        ct.InverseTransformPoint(gt.position), ct.InverseTransformDirection(gt.forward));
                 }
-                else
-                {
-                    ZG2MPUtil.BroadcastMarkerState(car);
-                }
+            }
+            else
+            {
+                ZG2MPUtil.BroadcastMarkerState(car);
             }
         }
     }
 
     /// <summary>
-    /// Detects when a ZG2 board gadget is removed from a train car.
-    /// Prefix on <see cref="GadgetBase.Remove"/> — captures the TrainCar reference
-    /// before the gadget is unlinked, then notifies the map marker manager.
-    /// In multiplayer, also notifies the host via <see cref="ZG2MPBoardSync"/>.
+    /// Prefix/postfix on <see cref="GadgetBase.Remove"/>: a ZG2 board was unmounted.
     /// </summary>
     [HarmonyPatch(typeof(GadgetBase), nameof(GadgetBase.Remove))]
     public static class GadgetRemovedPatch
     {
+        public class State
+        {
+            public TrainCar Car;
+            public GadgetBase Gadget;
+            public ZG2Board Board;
+            public int Key;
+        }
+
         [HarmonyPrefix]
-        public static void Prefix(GadgetBase __instance, out TrainCar __state)
+        public static void Prefix(GadgetBase __instance, out State __state)
         {
             __state = null;
-            if (!Main.Enabled) return;
-            if (!ZG2Board.IsZG2Board(__instance)) return;
+            if (!Main.Enabled || !ZG2Board.IsZG2Board(__instance)) return;
 
-            // Capture the TrainCar before Unlink clears the reference
-            __state = __instance.TrainCar;
+            var car = __instance.TrainCar; // captured before Unlink clears it
+            if (car == null) return;
+
+            __state = new State
+            {
+                Car = car,
+                Gadget = __instance,
+                Board = __instance.GadgetItem != null ? __instance.GadgetItem.GetComponent<ZG2Board>() : null,
+                Key = __instance.GetInstanceID()
+            };
         }
 
         [HarmonyPostfix]
-        public static void Postfix(TrainCar __state)
+        public static void Postfix(State __state)
         {
-            if (__state == null) return;
+            if (__state == null || __state.Car == null) return;
+            var car = __state.Car;
 
-            // Local map marker (works for both host and client)
-            ZG2MapMarkerManager.OnBoardRemoved(__state);
+            ZG2BoardWear.OnBoardRemoved(__state.Gadget, __state.Board);
+            ZG2MapMarkerManager.OnBoardRemoved(car);
 
-            // In MP as a client, notify the host so it can update its tracking;
-            // as the host, tell clients the car's new marker state
             if (ZG2MPUtil.IsClient)
             {
-                string carId = __state.logicCar?.ID;
+                string carId = car.logicCar?.ID;
                 if (carId != null)
-                    ZG2MPUtil.NotifyBoardRemoved(carId);
+                    ZG2MPUtil.NotifyBoardRemoved(carId, __state.Key);
             }
             else
             {
-                ZG2MPUtil.BroadcastMarkerState(__state);
+                ZG2MPUtil.BroadcastMarkerState(car);
             }
         }
     }
