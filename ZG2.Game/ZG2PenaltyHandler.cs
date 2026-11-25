@@ -1,181 +1,187 @@
 using System;
 using System.Collections.Generic;
-using DV.ServicePenalty;
-using DV.UI;
-using DV.UIFramework;
-using DV.Utils;
+using System.Reflection;
+using DV.InventorySystem;
+using DV.Logic.Job;
+using DV.ThingTypes;
 
 namespace ZG2
 {
     /// <summary>
-    /// Handles the post-job fine when a job is completed without ZG2 boards.
-    /// Two-phase evaluation:
-    ///   1. <see cref="PreEvaluate"/> (Prefix) — calculates fine, stores as pending
-    ///      so <see cref="Patches.BookletPaymentPatch"/> can inject it into the booklet.
-    ///   2. <see cref="CommitPendingFine"/> (Postfix) — registers the
-    ///      <see cref="ZG2FineDebt"/> with the career terminal if the job completed.
+    /// Reduces the payout of a job according to its failed Zg2 checkpoints.
+    ///
+    ///   penalty = min(failed × PenaltyPerCheckpoint, MaxPenalty)
+    ///   payout  = regular payout × (1 − penalty)
+    ///
+    /// The reduction is applied silently (no HUD, no notification, no debt): right before the
+    /// game validates the job, the job's initial wage is scaled down. The game then pays and
+    /// prints the job report with the reduced amount; the Zg2 page in the report explains why.
+    /// If validation does not complete the job, the original wage is restored.
+    /// If the wage cannot be changed (unexpected game version), the difference is taken from
+    /// the wallet after completion instead.
     /// </summary>
     public static class ZG2PenaltyHandler
     {
-        private static readonly List<ZG2FineDebt> activeDebts = new List<ZG2FineDebt>();
+        private class Pending
+        {
+            public float OriginalWage;
+            public bool WageChanged;
+            public float Deduction;
+        }
 
-        /// <summary>Job ID for the pending fine (set by <see cref="PreEvaluate"/>,
-        /// consumed by <see cref="CommitPendingFine"/>).</summary>
-        internal static string PendingFineJobId { get; private set; }
+        private static readonly Dictionary<string, Pending> pending = new Dictionary<string, Pending>();
 
-        /// <summary>Fine amount for the pending fine.</summary>
-        internal static float PendingFineAmount { get; private set; }
+        /// <summary>Jobs whose local wage was already reduced (host at validation, client at report).</summary>
+        private static readonly HashSet<string> appliedJobs = new HashSet<string>();
 
         public static void Initialise()
         {
-            activeDebts.Clear();
-            PendingFineJobId = null;
-            PendingFineAmount = 0f;
+            pending.Clear();
+            appliedJobs.Clear();
         }
 
-        /// <summary>
-        /// Phase 1: Pre-evaluate whether a fine is due. Called from
-        /// <see cref="Patches.JobValidatorPatch"/> Prefix <b>before</b> the booklet is
-        /// created, so the fine amount is available for the payment page patch.
-        /// Does NOT register the debt or modify tracker state.
-        /// </summary>
-        public static void PreEvaluate(string jobId, float totalWage)
-        {
-            PendingFineJobId = null;
-            PendingFineAmount = 0f;
-
-            if (!ZG2MPUtil.IsSinglePlayerOrHost) return;
-            if (string.IsNullOrEmpty(jobId)) return;
-
-            var trackData = ZG2JobTracker.GetJobData(jobId);
-            if (trackData == null)
-            {
-                Main.Log($"Job {jobId} not tracked — no penalty to pre-evaluate.");
-                return;
-            }
-
-            if (trackData.EverHadBoard)
-            {
-                Main.Log($"Job {jobId} had ZG2 board — no fine.");
-                return;
-            }
-
-            float penaltyPercent = Main.Settings.PenaltyPercent;
-            if (penaltyPercent <= 0f) return;
-
-            float fineAmount = (float)Math.Round(totalWage * (penaltyPercent / 100f), 2);
-            if (fineAmount <= 0f) return;
-
-            PendingFineJobId = jobId;
-            PendingFineAmount = fineAmount;
-            Main.Log($"Job {jobId} pre-evaluated: fine will be {fineAmount:F0} ({penaltyPercent:F0}%)");
-        }
-
-        /// <summary>
-        /// Phase 2: If a pending fine exists and the job actually completed,
-        /// register the <see cref="ZG2FineDebt"/> with the career terminal and
-        /// notify the player. Always cleans up tracker + pending state.
-        /// </summary>
-        public static void CommitPendingFine(string jobId, bool jobCompleted)
-        {
-            if (!ZG2MPUtil.IsSinglePlayerOrHost) return;
-
-            try
-            {
-                if (!jobCompleted)
-                {
-                    if (PendingFineJobId != null)
-                        Main.Log($"Job {jobId} did not complete — discarding pending fine.");
-                    return;
-                }
-
-                // Clean up tracker now that the job is done
-                ZG2JobTracker.StopTracking(jobId);
-
-                if (PendingFineJobId != jobId || PendingFineAmount <= 0f)
-                {
-                    if (PendingFineJobId == null)
-                        Main.Log($"Job {jobId} completed — no fine pending.");
-                    return;
-                }
-
-                float fineAmount = PendingFineAmount;
-                float penaltyPercent = Main.Settings.PenaltyPercent;
-
-                var debt = new ZG2FineDebt(jobId, fineAmount);
-                SingletonBehaviour<CareerManagerDebtController>.Instance.RegisterDebt(debt);
-                activeDebts.Add(debt);
-
-                Main.Log($"Job {jobId} completed WITHOUT ZG2 board. " +
-                         $"Fine registered: {fineAmount:F0} ({penaltyPercent:F0}%)");
-
-                ShowFineNotification(fineAmount, penaltyPercent);
-            }
-            finally
-            {
-                PendingFineJobId = null;
-                PendingFineAmount = 0f;
-            }
-        }
-
-        /// <summary>
-        /// Called by <see cref="ZG2FineDebt.Pay"/> when the player pays off a fine.
-        /// </summary>
-        internal static void OnFineDebtPaid(ZG2FineDebt debt)
-        {
-            activeDebts.Remove(debt);
-            Main.Log($"ZG2 fine paid: {debt.ID}");
-        }
-
-        /// <summary>
-        /// Unregisters all active ZG2 debts (called during mod teardown / world unload).
-        /// </summary>
         public static void Shutdown()
         {
-            CareerManagerDebtController controller = null;
-
-            try { controller = SingletonBehaviour<CareerManagerDebtController>.Instance; }
-            catch { /* Instance may not exist during teardown */ }
-
-            if (controller != null)
-            {
-                foreach (var debt in activeDebts)
-                {
-                    try { controller.UnregisterDebt(debt); }
-                    catch (Exception ex) { Main.LogError($"Failed to unregister debt: {ex}"); }
-                }
-            }
-
-            activeDebts.Clear();
-            PendingFineJobId = null;
-            PendingFineAmount = 0f;
+            pending.Clear();
+            appliedJobs.Clear();
         }
 
-        private static void ShowFineNotification(float fineAmount, float penaltyPercent)
+        /// <summary>Prefix of JobValidator.ValidateJob (host / single player).</summary>
+        public static void BeforeValidate(Job job)
         {
-            string message = $"ZG2 Fine: {fineAmount:F0} ({penaltyPercent:F0}% — missing Zugschlusstafel)";
+            if (job == null || job.State != JobState.InProgress) return;
+            if (!ZG2MPUtil.IsSinglePlayerOrHost) return;
 
-            try
+            var log = ZG2JobTracker.GetLog(job.ID);
+            if (log == null) return;
+
+            var s = Main.Settings;
+            float pct = ZG2JobLog.ComputePenaltyPercent(log.Failed, s.PenaltyPerCheckpoint, s.MaxPenalty);
+
+            // Remember what will be applied so the report page can show it.
+            log.PenaltyPerCheckpoint = s.PenaltyPerCheckpoint;
+            log.MaxPenalty = s.MaxPenalty;
+            log.AppliedPenaltyPercent = pct;
+            log.DeductedAmount = 0f;
+
+            if (pct <= 0f || appliedJobs.Contains(job.ID)) return;
+
+            float wageBefore = job.GetWageForTheJob();
+            float original = job.initialWage;
+            var p = new Pending { OriginalWage = original, Deduction = (float)Math.Round(wageBefore * pct / 100f, 2) };
+
+            if (JobWage.TrySet(job, original * (1f - pct / 100f)))
             {
-                var canvasController = SingletonBehaviour<ACanvasController<CanvasController.ElementType>>.Instance;
-                if (canvasController != null)
+                float wageAfter = job.GetWageForTheJob();
+                if (wageAfter < wageBefore - 0.01f)
                 {
-                    canvasController.NotificationManager.ShowNotification(
-                        message,
-                        null,
-                        8f,
-                        false,
-                        null,
-                        false);
+                    p.WageChanged = true;
+                    p.Deduction = wageBefore - wageAfter;
                 }
                 else
                 {
-                    Main.LogWarning($"Cannot show notification (no CanvasController). Fine: {message}");
+                    JobWage.TrySet(job, original); // wage not derived from initialWage → use wallet fallback
                 }
             }
-            catch (Exception ex)
+
+            log.DeductedAmount = p.Deduction;
+            pending[job.ID] = p;
+            if (p.WageChanged) appliedJobs.Add(job.ID);
+
+            // Clients print their own report → send the final protocol before the job state update.
+            if (ZG2MPUtil.IsMultiplayerActive)
+                ZG2MPUtil.BroadcastJobLog(job.ID, log.Serialize());
+
+            Main.Log($"Zg2: job {job.ID} – {log.Failed} failed checkpoint(s) → -{pct:0.#}% (-${p.Deduction:N0}).");
+        }
+
+        /// <summary>Postfix of JobValidator.ValidateJob (host / single player).</summary>
+        public static void AfterValidate(Job job)
+        {
+            if (job == null || !ZG2MPUtil.IsSinglePlayerOrHost) return;
+
+            pending.TryGetValue(job.ID, out var p);
+            pending.Remove(job.ID);
+
+            var log = ZG2JobTracker.GetLog(job.ID);
+
+            if (job.State != JobState.Completed)
             {
-                Main.LogError($"Failed to display fine notification: {ex}");
+                // Not completed (tasks not done, printer cooldown, ...) – undo everything.
+                if (p != null && p.WageChanged) JobWage.TrySet(job, p.OriginalWage);
+                appliedJobs.Remove(job.ID);
+                if (log != null)
+                {
+                    log.AppliedPenaltyPercent = -1f;
+                    log.DeductedAmount = 0f;
+                    if (ZG2MPUtil.IsMultiplayerActive) ZG2MPUtil.BroadcastJobLog(job.ID, log.Serialize());
+                }
+                return;
+            }
+
+            if (p != null && !p.WageChanged && p.Deduction > 0f)
+            {
+                try
+                {
+                    Inventory.Instance.RemoveMoney(p.Deduction);
+                }
+                catch (Exception ex)
+                {
+                    Main.LogError($"Zg2: could not deduct {p.Deduction:F0} for job {job.ID}: {ex.Message}");
+                }
+            }
+
+            ZG2JobTracker.FinishJob(job.ID);
+        }
+
+        /// <summary>
+        /// Prefix of BookletCreator.CreateJobReport. On MP clients the report is created from the
+        /// client's own job copy, so the reduction is applied there too (display only – money is
+        /// handled by the host).
+        /// </summary>
+        public static void BeforeCreateReport(Job job)
+        {
+            if (job == null || ZG2MPUtil.IsSinglePlayerOrHost) return;
+            if (appliedJobs.Contains(job.ID)) return;
+
+            var log = ZG2JobTracker.GetLog(job.ID);
+            if (log == null || log.AppliedPenaltyPercent <= 0f) return;
+
+            if (JobWage.TrySet(job, job.initialWage * (1f - log.AppliedPenaltyPercent / 100f)))
+                appliedJobs.Add(job.ID);
+        }
+
+        /// <summary>Reflection access to Job.initialWage (property or field, setter may be private).</summary>
+        private static class JobWage
+        {
+            private static bool resolved;
+            private static MethodInfo setter;
+            private static FieldInfo field;
+
+            public static bool TrySet(Job job, float value)
+            {
+                try
+                {
+                    if (!resolved)
+                    {
+                        resolved = true;
+                        const BindingFlags all = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+                        var t = typeof(Job);
+                        setter = t.GetProperty("initialWage", all)?.GetSetMethod(true);
+                        if (setter == null)
+                            field = t.GetField("initialWage", all) ?? t.GetField("<initialWage>k__BackingField", all);
+                        if (setter == null && field == null)
+                            Main.LogWarning("Zg2: Job.initialWage is not writable – using wallet deduction instead.");
+                    }
+
+                    if (setter != null) { setter.Invoke(job, new object[] { value }); return true; }
+                    if (field != null) { field.SetValue(job, value); return true; }
+                }
+                catch (Exception ex)
+                {
+                    Main.LogError($"Zg2: failed to set job wage: {ex.Message}");
+                }
+                return false;
             }
         }
     }

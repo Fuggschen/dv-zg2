@@ -37,6 +37,10 @@
     <Reference Include="DV.ThingTypes" />
     <Reference Include="DV.UIFramework" />
     <Reference Include="DV.Simulation" />
+    <!-- Rail tracks / point sets for the station zones -->
+    <Reference Include="DV.RailTrack" />
+    <Reference Include="DV.PointSet" />
+    <Reference Include="net.smkd.vector3d" />
     <Reference Include="Newtonsoft.Json" />
 
     <!-- Unity engine modules -->
@@ -44,6 +48,10 @@
     <Reference Include="UnityEngine.PhysicsModule" />
     <Reference Include="UnityEngine.AssetBundleModule" />
     <Reference Include="UnityEngine.IMGUIModule" />
+    <Reference Include="UnityEngine.TextRenderingModule" />
+    <Reference Include="UnityEngine.ImageConversionModule" />
+    <Reference Include="UnityEngine.UI" />
+    <Reference Include="UnityEngine.UIModule" />
 
     <!-- Unity Mod Manager -->
     <Reference Include="UnityModManager" />
@@ -55,8 +63,14 @@
     <Reference Include="DV.UI" />
 
     <!-- custom_item_mod framework (UMM mod dependency) -->
-    <Reference Include="custom_item_mod" />
-    <Reference Include="custom_item_components" />
+    <Reference Include="custom_item_mod">
+      <HintPath>$(DvInstallDir)\Mods\custom_item_mod\custom_item_mod.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="custom_item_components">
+      <HintPath>$(DvInstallDir)\Mods\custom_item_mod\custom_item_components.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
 
     <!-- TMPro and DV.Shops (needed by custom_item_mod API types) -->
     <Reference Include="Unity.TextMeshPro" />

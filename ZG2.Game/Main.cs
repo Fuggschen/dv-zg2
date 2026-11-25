@@ -15,6 +15,7 @@ namespace ZG2
         public static UnityModManager.ModEntry ModEntry { get; private set; }
         public static ZG2Settings Settings { get; private set; }
         public static bool Enabled { get; private set; }
+        public static bool WorldLoaded { get; private set; }
 
         private static Harmony harmony;
         private static GameObject modManagerGO;
@@ -29,6 +30,7 @@ namespace ZG2
             try
             {
                 Settings = UnityModManager.ModSettings.Load<ZG2Settings>(modEntry);
+                Settings.Migrate();
             }
             catch (Exception ex)
             {
@@ -75,6 +77,7 @@ namespace ZG2
         private static void OnSaveGUI(UnityModManager.ModEntry modEntry)
         {
             Settings.Save(modEntry);
+            Settings.OnSaved();
         }
 
         private static readonly Action worldLoadedHandler = OnWorldLoaded;
@@ -114,7 +117,12 @@ namespace ZG2
                     LogWarning("ZG2BoardFactory was not initialised by ShopInitPatch — shops may not have loaded yet.");
 
                 // 2. Restore save data (must happen before spawning)
+                ZG2BoardWear.Clear();
                 ZG2SaveManager.Initialise();
+
+                // 2b. Station zones for the Ausfahrt/Einfahrt checkpoints (host / single player)
+                if (ZG2MPUtil.IsSinglePlayerOrHost)
+                    ZG2StationZones.Build();
 
                 // 3. Start job tracker coroutine
                 var tracker = modManagerGO.AddComponent<ZG2JobTracker>();
@@ -133,6 +141,9 @@ namespace ZG2
                 // 7. Initialise MP integration (client → host notifications)
                 ZG2MPUtil.Initialise();
 
+                ZG2JobTypes.DetectFromMods();     // once per session: job types of other mods
+                ZG2JobTypes.LearnAbbreviations(); // once per session: their job ID abbreviations
+                WorldLoaded = true;
                 Log("ZG2 mod systems initialised.");
             }
             catch (Exception ex)
@@ -151,10 +162,15 @@ namespace ZG2
 
         private static void TeardownModSystems()
         {
+            WorldLoaded = false;
             try
             {
                 ZG2MPUtil.Shutdown();
                 ZG2JobTracker.Shutdown();
+                ZG2PenaltyHandler.Shutdown();
+                ZG2StationZones.Clear();
+                ZG2BoardWear.Clear();
+                ZG2CustomTextures.Shutdown();
                 ZG2MapMarkerManager.Shutdown();
                 ZG2SaveManager.Shutdown();
                 ZG2StationSpawner.Shutdown();

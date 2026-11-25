@@ -87,12 +87,18 @@ namespace ZG2
             Vector3 position = spawnSurface.transform.position;
             Quaternion rotation = spawnSurface.transform.rotation;
 
-            string[] allPrefabs = ZG2BoardFactory.AllPrefabNames;
+            // Stations only hand out used (worn) boards; new boards are sold in the shops.
+            // Each board gets its own random wear level/dirt colour in ZG2Board.Start.
+            string[] stationPrefabs = ZG2BoardFactory.StationPrefabNames;
+            var t = spawnSurface.transform;
 
             for (int i = 0; i < count; i++)
             {
-                string prefabName = allPrefabs[Random.Range(0, allPrefabs.Length)];
-                if (SpawnBoard(prefabName, position, rotation))
+                string prefabName = stationPrefabs[Random.Range(0, stationPrefabs.Length)];
+                // Spread the boards a little so they do not spawn inside each other.
+                Vector3 offset = t.right * Random.Range(-0.25f, 0.25f) + t.forward * Random.Range(-0.15f, 0.15f)
+                                 + Vector3.up * (0.03f * i);
+                if (SpawnBoard(prefabName, position + offset, rotation * Quaternion.Euler(0f, Random.Range(-15f, 15f), 0f)))
                     spawned++;
             }
 

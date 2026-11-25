@@ -13,7 +13,7 @@ namespace ZG2
     public static class ZG2SaveManager
     {
         private const string SAVE_KEY = "ZG2Mod_Data";
-        private const int SAVE_VERSION = 1;
+        private const int SAVE_VERSION = 2;
 
         private static bool subscribed;
 
@@ -71,7 +71,9 @@ namespace ZG2
                 var root = new JObject
                 {
                     ["version"] = SAVE_VERSION,
-                    ["jobTracking"] = SerialiseJobTracking()
+                    ["jobLogs"] = SerialiseJobLogs(),
+                    ["trainStates"] = ZG2JobTracker.SerializeTrainStates(),
+                    ["mountedWear"] = ZG2BoardWear.Serialize()
                 };
 
                 data.SetJObject(SAVE_KEY, root);
@@ -105,8 +107,15 @@ namespace ZG2
                     Main.LogWarning($"Save data version {version} is newer than supported ({SAVE_VERSION}). Some data may be lost.");
                 }
 
-                // Restore job tracking
-                DeserialiseJobTracking(root["jobTracking"] as JArray);
+                // v1 only stored "ever had a board" – that is meaningless for the checkpoint
+                // system, so v1 jobs simply start with an empty protocol.
+                if (version >= 2)
+                    DeserialiseJobLogs(root["jobLogs"] as JArray);
+                else
+                    ZG2JobTracker.Restore(null);
+
+                ZG2JobTracker.RestoreTrainStates(root["trainStates"] as JArray);
+                ZG2BoardWear.Deserialize(root["mountedWear"] as JArray);
 
                 Main.Log("ZG2 save data loaded.");
             }
@@ -118,46 +127,37 @@ namespace ZG2
 
         #region Serialisation helpers
 
-        private static JArray SerialiseJobTracking()
+        private static JArray SerialiseJobLogs()
         {
             var array = new JArray();
-            foreach (var kvp in ZG2JobTracker.TrackedJobs)
+            foreach (var kvp in ZG2JobTracker.Logs)
             {
-                var entry = new JObject
+                array.Add(new JObject
                 {
                     ["jobId"] = kvp.Key,
-                    ["everHadBoard"] = kvp.Value.EverHadBoard,
-                    ["currentlyHasBoard"] = kvp.Value.CurrentlyHasBoard
-                };
-                array.Add(entry);
+                    ["log"] = kvp.Value.Serialize()
+                });
             }
             return array;
         }
 
-        private static void DeserialiseJobTracking(JArray array)
+        private static void DeserialiseJobLogs(JArray array)
         {
-            var dict = new Dictionary<string, ZG2JobData>();
-
+            var list = new List<ZG2JobLog>();
             if (array != null)
             {
                 foreach (var token in array)
                 {
-                    var obj = token as JObject;
-                    if (obj == null) continue;
-
+                    if (!(token is JObject obj)) continue;
                     string jobId = obj.Value<string>("jobId");
                     if (string.IsNullOrEmpty(jobId)) continue;
-
-                    var data = new ZG2JobData(jobId)
-                    {
-                        EverHadBoard = obj.Value<bool?>("everHadBoard") ?? false,
-                        CurrentlyHasBoard = obj.Value<bool?>("currentlyHasBoard") ?? false
-                    };
-                    dict[jobId] = data;
+                    var log = ZG2JobLog.Deserialize(jobId, obj.Value<string>("log"));
+                    log.AppliedPenaltyPercent = -1f; // not validated yet
+                    list.Add(log);
                 }
             }
-
-            ZG2JobTracker.RestoreTrackedJobs(dict);
+            ZG2JobTracker.Restore(list);
+            Main.Log($"ZG2: restored {list.Count} job protocol(s).");
         }
 
         #endregion

@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using UnityEngine;
 using UnityModManagerNet;
 
 namespace ZG2
@@ -57,7 +59,7 @@ namespace ZG2
                         return;
                     }
 
-                    var mpAssembly = Assembly.LoadFile(path);
+                    var mpAssembly = Assembly.LoadFrom(path);
                     var bootstrap = mpAssembly.GetType(MP_INTEGRATION_BOOTSTRAP);
 
                     if (bootstrap == null)
@@ -89,19 +91,23 @@ namespace ZG2
         public static bool HasClientReportedBoard(string carId)
             => integration.HasClientReportedBoard(carId);
 
-        public static void NotifyBoardAttached(string carId)
-            => integration.NotifyBoardAttached(carId);
+        public static void GetClientBoardPoses(string carId, List<ZG2BoardPose> localPoses)
+            => integration.GetClientBoardPoses(carId, localPoses);
 
-        public static void NotifyBoardRemoved(string carId)
-            => integration.NotifyBoardRemoved(carId);
+        public static void NotifyBoardAttached(string carId, int boardKey, Vector3 localPosition, Vector3 localForward)
+            => integration.NotifyBoardAttached(carId, boardKey, localPosition, localForward);
+
+        public static void NotifyBoardRemoved(string carId, int boardKey)
+            => integration.NotifyBoardRemoved(carId, boardKey);
 
         public static void BroadcastMarkerState(TrainCar car)
             => integration.BroadcastMarkerState(car);
 
-        public static void BroadcastSettings(float penaltyPercent, int boardsPerStation,
-            bool showMapMarkers, bool spawnBoardsAtStations, float checkIntervalSeconds)
-            => integration.BroadcastSettings(penaltyPercent, boardsPerStation,
-                showMapMarkers, spawnBoardsAtStations, checkIntervalSeconds);
+        public static void BroadcastSettings(string data)
+            => integration.BroadcastSettings(data);
+
+        public static void BroadcastJobLog(string jobId, string data)
+            => integration.BroadcastJobLog(jobId, data);
 
         public static void Initialise()
             => integration.Initialise();
@@ -115,7 +121,6 @@ namespace ZG2
 
         /// <summary>
         /// Default no-op implementation used when the MP mod is not present.
-        /// All properties return safe defaults; all methods are silent no-ops.
         /// </summary>
         private class NoOpIntegration : IZG2MPIntegration
         {
@@ -123,11 +128,12 @@ namespace ZG2
             public bool IsSinglePlayerOrHost => true;
             public bool IsClient => false;
             public bool HasClientReportedBoard(string carId) => false;
-            public void NotifyBoardAttached(string carId) { }
-            public void NotifyBoardRemoved(string carId) { }
+            public void GetClientBoardPoses(string carId, List<ZG2BoardPose> localPoses) { }
+            public void NotifyBoardAttached(string carId, int boardKey, Vector3 localPosition, Vector3 localForward) { }
+            public void NotifyBoardRemoved(string carId, int boardKey) { }
             public void BroadcastMarkerState(TrainCar car) { }
-            public void BroadcastSettings(float penaltyPercent, int boardsPerStation,
-                bool showMapMarkers, bool spawnBoardsAtStations, float checkIntervalSeconds) { }
+            public void BroadcastSettings(string data) { }
+            public void BroadcastJobLog(string jobId, string data) { }
             public void Initialise() { }
             public void Shutdown() { }
         }

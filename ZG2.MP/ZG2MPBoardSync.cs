@@ -3,6 +3,7 @@ using DV.Utils;
 using MPAPI;
 using MPAPI.Interfaces;
 using MPAPI.Types;
+using UnityEngine;
 using ZG2;
 
 namespace ZG2.MP
@@ -16,11 +17,14 @@ namespace ZG2.MP
     public class ZG2MPBoardSync
     {
         /// <summary>
-        /// Maps carId → (playerId → board count) for client-reported boards.
-        /// Only maintained on the host. Tracks how many boards each player has on each car.
+        /// carId → ((playerId &lt;&lt; 32) | boardKey) → car-local pose of a client-reported board.
+        /// Only maintained on the host; the poses are needed for the train end validation.
         /// </summary>
-        private readonly Dictionary<string, Dictionary<byte, int>> clientBoards
-            = new Dictionary<string, Dictionary<byte, int>>();
+        private readonly Dictionary<string, Dictionary<long, ZG2BoardPose>> clientBoards
+            = new Dictionary<string, Dictionary<long, ZG2BoardPose>>();
+
+        private static long BoardId(byte player, int key) => ((long)player << 32) | (uint)key;
+        private static byte PlayerOf(long id) => (byte)(id >> 32);
 
         /// <summary>
         /// Car IDs the host reports as marked. Only maintained on clients.
@@ -126,20 +130,21 @@ namespace ZG2.MP
         {
             if (string.IsNullOrEmpty(packet.CarId)) return;
 
-            if (!clientBoards.TryGetValue(packet.CarId, out var players))
+            if (!clientBoards.TryGetValue(packet.CarId, out var boards))
             {
-                players = new Dictionary<byte, int>();
-                clientBoards[packet.CarId] = players;
+                boards = new Dictionary<long, ZG2BoardPose>();
+                clientBoards[packet.CarId] = boards;
             }
 
-            players.TryGetValue(sender.PlayerId, out int count);
-            players[sender.PlayerId] = count + 1;
+            bool firstOnCar = boards.Count == 0;
+            boards[BoardId(sender.PlayerId, packet.BoardKey)] = new ZG2BoardPose(
+                new Vector3(packet.PX, packet.PY, packet.PZ),
+                new Vector3(packet.FX, packet.FY, packet.FZ));
 
-            Main.Log($"ZG2MPBoardSync: Player {sender.PlayerId} ({sender.DisplayName}) " +
-                     $"attached board to car {packet.CarId} (count: {count + 1}).");
+            if (Main.Settings.DebugLogging)
+                Main.Log($"ZG2MPBoardSync: {sender.DisplayName} mounted board on {packet.CarId} ({boards.Count} reported).");
 
-            // Trigger map marker on host if this is the first board on this car
-            if (count == 0)
+            if (firstOnCar)
                 TryUpdateMapMarker(packet.CarId, attached: true);
 
             BroadcastMarkerState(FindTrainCarById(packet.CarId));
@@ -148,33 +153,16 @@ namespace ZG2.MP
         private void HandleBoardRemoved(ZG2BoardRemovedPacket packet, IPlayer sender)
         {
             if (string.IsNullOrEmpty(packet.CarId)) return;
+            if (!clientBoards.TryGetValue(packet.CarId, out var boards)) return;
+            if (!boards.Remove(BoardId(sender.PlayerId, packet.BoardKey))) return;
 
-            if (!clientBoards.TryGetValue(packet.CarId, out var players)) return;
-            if (!players.TryGetValue(sender.PlayerId, out int count)) return;
-
-            count--;
-            if (count <= 0)
-            {
-                players.Remove(sender.PlayerId);
-                Main.Log($"ZG2MPBoardSync: Player {sender.PlayerId} ({sender.DisplayName}) " +
-                         $"removed last board from car {packet.CarId}.");
-            }
-            else
-            {
-                players[sender.PlayerId] = count;
-                Main.Log($"ZG2MPBoardSync: Player {sender.PlayerId} ({sender.DisplayName}) " +
-                         $"removed board from car {packet.CarId} (count: {count}).");
-            }
-
-            // Remove map marker only when no players have any boards on this car
-            if (players.Count == 0)
+            if (boards.Count == 0)
             {
                 clientBoards.Remove(packet.CarId);
                 TryUpdateMapMarker(packet.CarId, attached: false);
             }
 
-            // Also sent back to the reporting client: it removed its marker locally,
-            // but the host or another player may still have a board on this car.
+            // Also sent back to the reporting client: the host or another player may still have a board here.
             BroadcastMarkerState(FindTrainCarById(packet.CarId));
         }
 
@@ -183,12 +171,15 @@ namespace ZG2.MP
             // Remove all board entries for this player
             var carsToClean = new List<string>();
 
+            var tmp = new List<long>();
             foreach (var kvp in clientBoards)
             {
-                if (kvp.Value.Remove(player.PlayerId) && kvp.Value.Count == 0)
-                {
+                tmp.Clear();
+                foreach (var id in kvp.Value.Keys)
+                    if (PlayerOf(id) == player.PlayerId) tmp.Add(id);
+                foreach (var id in tmp) kvp.Value.Remove(id);
+                if (tmp.Count > 0 && kvp.Value.Count == 0)
                     carsToClean.Add(kvp.Key);
-                }
             }
 
             foreach (var carId in carsToClean)
@@ -207,9 +198,10 @@ namespace ZG2.MP
 
         private void OnPlayerReady(IPlayer player)
         {
-            // Send current settings to the newly connected player
+            // Send current settings, markers and job protocols to the newly connected player
             SendSettingsToPlayer(player);
             SendMarkersToPlayer(player);
+            SendJobLogsToPlayer(player);
         }
 
         /// <summary>
@@ -258,7 +250,14 @@ namespace ZG2.MP
         public bool HasClientReportedBoard(string carId)
         {
             if (string.IsNullOrEmpty(carId)) return false;
-            return clientBoards.TryGetValue(carId, out var players) && players.Count > 0;
+            return clientBoards.TryGetValue(carId, out var boards) && boards.Count > 0;
+        }
+
+        /// <summary>Car-local poses of all client-reported boards on the car (host).</summary>
+        public void GetClientBoardPoses(string carId, List<ZG2BoardPose> localPoses)
+        {
+            if (string.IsNullOrEmpty(carId) || !clientBoards.TryGetValue(carId, out var boards)) return;
+            localPoses.AddRange(boards.Values);
         }
 
         /// <summary>
@@ -294,12 +293,13 @@ namespace ZG2.MP
 
         #endregion
 
-        #region Client-side: send board placement notifications
+        #region Client-side: receive host state
 
         private void OnClientStarted(IClient client)
         {
             client.RegisterPacket<ZG2SettingsSyncPacket>(HandleSettingsReceived);
             client.RegisterPacket<ZG2MarkerStatePacket>(HandleMarkerState);
+            client.RegisterPacket<ZG2JobLogPacket>(HandleJobLog);
 
             var spawner = SingletonBehaviour<CarSpawner>.Instance;
             if (spawner != null)
@@ -367,98 +367,79 @@ namespace ZG2.MP
 
         #endregion
 
-        #region Settings sync
+        #region Settings and job protocol sync
 
-        /// <summary>
-        /// Called by the host when settings change or a new player connects.
-        /// Broadcasts current settings to all connected clients.
-        /// </summary>
-        public void BroadcastSettings(float penaltyPercent, int boardsPerStation,
-            bool showMapMarkers, bool spawnBoardsAtStations, float checkIntervalSeconds)
+        public void BroadcastSettings(string data)
         {
             var server = MultiplayerAPI.Server;
             if (server == null) return;
-
-            server.SendPacketToAll(new ZG2SettingsSyncPacket
-            {
-                PenaltyPercent = penaltyPercent,
-                BoardsPerStation = boardsPerStation,
-                ShowMapMarkers = showMapMarkers,
-                SpawnBoardsAtStations = spawnBoardsAtStations,
-                CheckIntervalSeconds = checkIntervalSeconds
-            }, reliable: true, excludeSelf: true);
-
-            Main.Log("ZG2MPBoardSync: Settings broadcast to all clients.");
+            server.SendPacketToAll(new ZG2SettingsSyncPacket { Data = data }, reliable: true, excludeSelf: true);
         }
 
-        /// <summary>
-        /// Called by the host to send current settings to a specific player.
-        /// </summary>
         private void SendSettingsToPlayer(IPlayer player)
         {
             var server = MultiplayerAPI.Server;
-            if (server == null || player == null) return;
-
-            var settings = Main.Settings;
-            if (settings == null) return;
-
-            server.SendPacketToPlayer(new ZG2SettingsSyncPacket
-            {
-                PenaltyPercent = settings.PenaltyPercent,
-                BoardsPerStation = settings.BoardsPerStation,
-                ShowMapMarkers = settings.ShowMapMarkers,
-                SpawnBoardsAtStations = settings.SpawnBoardsAtStations,
-                CheckIntervalSeconds = settings.CheckIntervalSeconds
-            }, player);
-
-            Main.Log($"ZG2MPBoardSync: Settings sent to player {player.PlayerId} ({player.DisplayName}).");
+            if (server == null || player == null || Main.Settings == null) return;
+            server.SendPacketToPlayer(new ZG2SettingsSyncPacket { Data = Main.Settings.ToSyncString() }, player);
         }
 
-        /// <summary>
-        /// Called on the client when a settings sync packet is received from the host.
-        /// Applies the host's settings to the local settings instance.
-        /// </summary>
         private void HandleSettingsReceived(ZG2SettingsSyncPacket packet)
         {
             var settings = Main.Settings;
             if (settings == null) return;
 
-            settings.PenaltyPercent = packet.PenaltyPercent;
-            settings.BoardsPerStation = packet.BoardsPerStation;
-            settings.SpawnBoardsAtStations = packet.SpawnBoardsAtStations;
-            settings.CheckIntervalSeconds = packet.CheckIntervalSeconds;
+            bool markersBefore = settings.ShowMapMarkers;
+            settings.ApplySyncString(packet.Data);
 
-            bool markersChanged = settings.ShowMapMarkers != packet.ShowMapMarkers;
-            settings.ShowMapMarkers = packet.ShowMapMarkers;
+            // ScanAndAddAll only sees local boards, so re-add the host's markers
+            if (!markersBefore && settings.ShowMapMarkers)
+                ApplyHostMarkers();
 
-            if (markersChanged)
-            {
-                ZG2MapMarkerManager.OnSettingChanged(settings.ShowMapMarkers);
-
-                // ScanAndAddAll only sees local boards, so re-add the host's markers
-                if (settings.ShowMapMarkers)
-                    ApplyHostMarkers();
-            }
-
-            Main.Log($"ZG2MPBoardSync: Settings received from host — " +
-                     $"Penalty={settings.PenaltyPercent:F0}%, " +
-                     $"BoardsPerStation={settings.BoardsPerStation}, " +
-                     $"MapMarkers={settings.ShowMapMarkers}, " +
-                     $"CheckInterval={settings.CheckIntervalSeconds:F0}s.");
+            Main.Log("ZG2MPBoardSync: settings received from host.");
         }
+
+        public void BroadcastJobLog(string jobId, string data)
+        {
+            var server = MultiplayerAPI.Server;
+            if (server == null || string.IsNullOrEmpty(jobId)) return;
+            server.SendPacketToAll(new ZG2JobLogPacket { JobId = jobId, Data = data ?? string.Empty }, reliable: true, excludeSelf: true);
+        }
+
+        private void SendJobLogsToPlayer(IPlayer player)
+        {
+            var server = MultiplayerAPI.Server;
+            if (server == null || player == null) return;
+            foreach (var kv in ZG2JobTracker.AllActiveLogs())
+                server.SendPacketToPlayer(new ZG2JobLogPacket { JobId = kv.Key, Data = kv.Value.Serialize() }, player);
+        }
+
+        private void HandleJobLog(ZG2JobLogPacket packet)
+        {
+            ZG2JobTracker.OnClientJobLog(packet.JobId, packet.Data);
+        }
+
+        #endregion
+
+        #region Client-side: board notifications
 
         /// <summary>
         /// Called by the client when a ZG2 board is attached to a train car.
         /// Sends a packet to the host so it can track the placement.
         /// </summary>
-        public void NotifyBoardAttached(string carId)
+        public void NotifyBoardAttached(string carId, int boardKey, Vector3 localPosition, Vector3 localForward)
         {
             if (string.IsNullOrEmpty(carId)) return;
 
             var client = MultiplayerAPI.Client;
             if (client == null) return;
 
-            client.SendPacketToServer(new ZG2BoardAttachedPacket { CarId = carId });
+            client.SendPacketToServer(new ZG2BoardAttachedPacket
+            {
+                CarId = carId,
+                BoardKey = boardKey,
+                PX = localPosition.x, PY = localPosition.y, PZ = localPosition.z,
+                FX = localForward.x, FY = localForward.y, FZ = localForward.z
+            });
             Main.Log($"ZG2MPBoardSync: Notified host of board attached to car {carId}.");
         }
 
@@ -466,14 +447,14 @@ namespace ZG2.MP
         /// Called by the client when a ZG2 board is removed from a train car.
         /// Sends a packet to the host so it can update its tracking.
         /// </summary>
-        public void NotifyBoardRemoved(string carId)
+        public void NotifyBoardRemoved(string carId, int boardKey)
         {
             if (string.IsNullOrEmpty(carId)) return;
 
             var client = MultiplayerAPI.Client;
             if (client == null) return;
 
-            client.SendPacketToServer(new ZG2BoardRemovedPacket { CarId = carId });
+            client.SendPacketToServer(new ZG2BoardRemovedPacket { CarId = carId, BoardKey = boardKey });
             Main.Log($"ZG2MPBoardSync: Notified host of board removed from car {carId}.");
         }
 

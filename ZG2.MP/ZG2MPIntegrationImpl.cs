@@ -1,4 +1,6 @@
+using System.Collections.Generic;
 using MPAPI;
+using UnityEngine;
 using ZG2;
 
 namespace ZG2.MP
@@ -41,27 +43,15 @@ namespace ZG2.MP
             }
         }
 
-        public bool HasClientReportedBoard(string carId)
-            => boardSync.HasClientReportedBoard(carId);
-
-        public void NotifyBoardAttached(string carId)
-            => boardSync.NotifyBoardAttached(carId);
-
-        public void NotifyBoardRemoved(string carId)
-            => boardSync.NotifyBoardRemoved(carId);
-
-        public void BroadcastMarkerState(TrainCar car)
-            => boardSync.BroadcastMarkerState(car);
-
-        public void BroadcastSettings(float penaltyPercent, int boardsPerStation,
-            bool showMapMarkers, bool spawnBoardsAtStations, float checkIntervalSeconds)
-            => boardSync.BroadcastSettings(penaltyPercent, boardsPerStation,
-                showMapMarkers, spawnBoardsAtStations, checkIntervalSeconds);
-
-        public void Initialise()
-            => boardSync.Initialise();
-
-        public void Shutdown()
-            => boardSync.Shutdown();
+        public bool HasClientReportedBoard(string carId) => boardSync.HasClientReportedBoard(carId);
+        public void GetClientBoardPoses(string carId, List<ZG2BoardPose> localPoses) => boardSync.GetClientBoardPoses(carId, localPoses);
+        public void NotifyBoardAttached(string carId, int boardKey, Vector3 localPosition, Vector3 localForward)
+            => boardSync.NotifyBoardAttached(carId, boardKey, localPosition, localForward);
+        public void NotifyBoardRemoved(string carId, int boardKey) => boardSync.NotifyBoardRemoved(carId, boardKey);
+        public void BroadcastMarkerState(TrainCar car) => boardSync.BroadcastMarkerState(car);
+        public void BroadcastSettings(string data) => boardSync.BroadcastSettings(data);
+        public void BroadcastJobLog(string jobId, string data) => boardSync.BroadcastJobLog(jobId, data);
+        public void Initialise() => boardSync.Initialise();
+        public void Shutdown() => boardSync.Shutdown();
     }
 }
