@@ -10,5 +10,5 @@
     "LoadAfter": ["Multiplayer"],
     "MultiplayerCompatibility": "All",
     "HomePage": "https://www.nexusmods.com/derailvalley/mods/1445",
-    "Repository": "https://raw.githubusercontent.com/fuggschen/dv-zg2/refs/heads/main/repository.json"
+    "Repository": "https://raw.githubusercontent.com/gercj187/dv-zg2/refs/heads/main/repository.json"
 }
