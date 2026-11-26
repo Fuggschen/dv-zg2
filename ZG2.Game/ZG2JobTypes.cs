@@ -241,6 +241,15 @@ namespace ZG2
                         }
                     }
 
+                    // A mod with its own job kind API is described completely by it: its JobType numbers
+                    // are not listed again (would show e.g. "Circle Haul Jobs (CH)" next to the API entry).
+                    if (hasKindApi)
+                    {
+                        foreach (var kv in found)
+                            if (known.TryGetValue(kv.Key.ToString(), out var dup)) dup.Installed = false;
+                        continue;
+                    }
+
                     // 1) Job ID codes the mod announces itself (see ReadAnnouncedCodes)
                     if (ReadAnnouncedCodes(entry.Assembly, modName)) changed = true;
 
